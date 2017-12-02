@@ -384,7 +384,7 @@ void vfnGetLine(void) {
    //pc.printf("%s\n", line);
 }
 
-void vfnSlaveRecieveData(void) {
+void vfnSlaveReceiveData(void) {
 
     #define MASTER 0
     #define SEQUENCE 1
@@ -583,7 +583,7 @@ int main() {
     } else {
         /* This is a slave board. */
         pc.printf("Slave\n");
-        vfnSlaveRecieveData();
+        vfnSlaveReceiveData();
         
         if(local_slave_data.read() == 1) {
             sequence = master_sequence;    
