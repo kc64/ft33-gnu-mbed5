@@ -78,11 +78,12 @@ byte pattern;           /* The current output pattern. */
 byte *ptrSequence;      /* A pointer to the desired sequence. */
 
 word sequenceLength;    /* The length of the desired sequence. */
-byte step;              /* The step in the current sequence. */
+word step;              /* The step in the current sequence. */
 byte num_ticks_per_step;  /* Each step can have one or more ticks before it changes. */
 char line[100];
 byte master_sequence; 
 int got_Z = 0;
+int got_R = 0;
 char stmp[10];
 byte current_step, slave_channel;
 sDimStep *ptrDimSequence;
@@ -103,9 +104,12 @@ void ZCD(void) {
         step++;
         if(step >= sequenceLength) {
             step = 0;
+            pc.putc('R');
+        }
+        else {
+            pc.putc('Z');
         }
         pattern = ~ptrSequence[step];
-        pc.putc('Z');
         #ifdef VERBOSE
         //pc.printf("P:%02x ", ptrSequence[step]);
         #endif
@@ -118,19 +122,27 @@ void ZCD(void) {
 }
 
 void ZCD_Slave(void) {
-
-    if(got_Z == 1) {
-        got_Z = 0;
+    if(got_R == 1) {
+        step = 0;
+    }
+    else if(got_Z == 1) {
         step++;
         if(step >= sequenceLength) {
             step = 0;
         }
+    }
+    
+    if ((got_R == 1) or (got_Z == 1)) {
         pattern = ~ptrSequence[step];
         #ifdef VERBOSE
         //pc.printf("P:%02x ", ptrSequence[step]);
         #endif
-        lights = pattern;  
+        lights = pattern;
+
+        got_R = 0;
+        got_Z = 0;      
     }
+    
     #ifdef VERBOSE
     //pc.printf("Z. clocks: %d, speed_clks: %d\n\r", clocks, speed_clks);
     #endif
@@ -220,7 +232,10 @@ void TimeToSwitch(void) {
             step = 0;
         }
         /* Put out the Z sync to the slaves. This tells them to step there sequence. */
-        pc.putc('Z');
+        #ifdef DEBUG
+        pc.printf("Z %02x\n", step);
+        #endif
+        // pc.putc('Z');
 
         for(i=0; i<8; i++) {
             Dimmer[i] = ptrDimSequence[step].Chan[i].start;
@@ -352,7 +367,7 @@ void vfnLoadSequencesFromSD(void) {
 void vfnBroadcastSequences(void) {
     
     int seq;
-    int step;
+    unsigned int step;
     int chan;
     
     pc.printf("N\n");
@@ -360,7 +375,7 @@ void vfnBroadcastSequences(void) {
         ptrDimSequence = (sDimStep *) ptrDimSequences[seq];
         sequenceLength = DimSequenceLengths[seq];
         pc.printf("Q %02x %02x\n", seq, sequenceLength);
-        for(step=0; step< (int) sequenceLength; step++) {
+        for(step=0; step < sequenceLength; step++) {
             pc.printf("S ");
             pc.printf("%02x ", ptrDimSequence[step].ticks);
             for(chan=0; chan<8; chan++) {
@@ -381,7 +396,7 @@ void vfnGetLine(void) {
         num++;
     }
     line[num] = 0x00;
-   //pc.printf("%s\n", line);
+    // pc.printf("%s\n", line);
 }
 
 void vfnSlaveReceiveData(void) {
@@ -496,6 +511,7 @@ int main() {
     byte sequence;          /* The current sequence. */
     byte i;
     byte sd;
+    byte sync_char;
 
     /* Basic initialization. */
     ok_to_switch = TRUE;
@@ -552,10 +568,9 @@ int main() {
         if(sequence < 240) {
             ptrSequence = (byte *) ptrSequences[sequence];
             sequenceLength = sequenceLengths[sequence];
-
             tkr_Timer.attach_us(&ZCD, 8333);
-            
-         } else {
+        }
+        else {
             sequence = sequence - 240;
             ptrDimSequence = (sDimStep *) ptrDimSequences[sequence];
             sequenceLength = DimSequenceLengths[sequence];
@@ -563,8 +578,8 @@ int main() {
             //tkr_Timer.attach_us(&ZCD_SD, 8333);
             /* This sets an interupt when a zero cross is detected. */
             int_ZCD.rise(&ZCD_SD);
-
         }
+
         clocks = SLOWEST_TIME;
         while(1) {
             /* Read the potentiometer. */
@@ -579,50 +594,62 @@ int main() {
             //pc.printf("C %i\n", speed_clks);
             wait(0.5);
         }
-        
-    } else {
+    }
+    else {
         /* This is a slave board. */
+        #ifdef DEBUG
         pc.printf("Slave\n");
-        vfnSlaveReceiveData();
-        
+        #endif
+
         if(local_slave_data.read() == 1) {
+            vfnSlaveReceiveData();
             sequence = master_sequence;    
-            slave_channel = dipswitch.read() & 0x0F; // only use lower switch for slave ID
-            // if(slave_channel > 15) {
-            //     slave_channel = 15;
-            // }
-            pc.printf("Use master data %d, %d\n", sequence, slave_channel);
-        } else {
+            #ifdef DEBUG
+            pc.printf("Use master data %d\n", sequence);
+            #endif
+        }
+        else {
             /* Read the dipswitch */
             sequence = dipswitch.read();
+            #ifdef DEBUG
             pc.printf("Use slave seqence %d\n", sequence);
+            #endif
         }
 
         if(sequence < 240) {
             ptrSequence = (byte *) ptrSequences[sequence];
             sequenceLength = sequenceLengths[sequence];
+            
             tkr_Timer.attach_us(&ZCD_Slave, 8333);
-
-        } else {
+        }
+        else {
             sequence = sequence - 240;
             ptrDimSequence = (sDimStep *) ptrDimSequences[sequence];
             sequenceLength = DimSequenceLengths[sequence];
                                   
             tkr_Timer.attach_us(&ZCD_SD_Slave, 8333);
         }
+
         clocks = SLOWEST_TIME;
+
         while(1) {
-            vfnGetLine();
+            // vfnGetLine();
             
             __disable_irq();
-            if( line[0] == 'Z') {
-                sscanf(line, "%*s %hhx", &current_step);
+            // if( line[0] == 'Z') {
+            //    sscanf(line, "%*s %hhx", &current_step);
                 //pc.printf("\nStep: %s, %02x\n", line, current_step);
+            //    got_Z = 1;
+            // }
+            sync_char = pc.getc();
+            if (sync_char == 'R') {
+                got_R = 1;
+            }
+            else if (sync_char == 'Z') {
                 got_Z = 1;
             }
             __enable_irq();
         }
     }
-    
 }
 
