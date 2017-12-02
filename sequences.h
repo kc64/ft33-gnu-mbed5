@@ -10337,6 +10337,7 @@ const byte sequence237[] = {
  *         Do not modify below this line          *
  **************************************************/
 
+
 const byte sequence238[] = {
 // Added an All On sequence 9-8-14 as part of the permenent program. Setting EE  
 //  This is the test sequence to see if you can get to all of the sequence.
@@ -10349,87 +10350,6 @@ const byte sequence239[] = {
     B00000000
 };
 
-const byte sequence240[] = {
-//*This the seq slot saved for the 16th set of 8 tracks on the SD Card if needed. # F0
-//  Sequence # 240 ON are for the SD Card Bank of 8Tracks  Custom programmed seq.
-    B00000000
-};
-
-const byte sequence241[] = {
-//* 1st Bank of 8 Tracks on the SC Card  T1-8  #F1
-    B00000000
-};
-
-const byte sequence242[] = {
-//* 2nd Bank of 8 Tracks on the SC Card  T9-16   F2
-    B00000000
-};
-
-const byte sequence243[] = {
-//* 3rd Bank of 8 Tracks on the SC Card  T17-24   F3
-    B00000000
-};
-
-const byte sequence244[] = {
-//* 4th Bank of 8 Tracks on the SC Card  T      F4
-    B00000000
-};
-
-const byte sequence245[] = {
-//* 5th Bank of 8 Tracks on the SC Card  T     F5
-    B00000000
-};
-
-const byte sequence246[] = {
-//* 6th Bank of 8 Tracks on the SC Card  T      F6
-    B00000000
-};
-
-const byte sequence247[] = {
-//* 7th Bank of 8 Tracks on the SC Card  T  F7
-    B00000000
-};
-
-const byte sequence248[] = {
-//* 8th Bank of 8 Tracks on the SC Card  T   F8    sent 248 to 103
-    B00000000
-};
-
-
-const byte sequence249[] = {
-//* 9th Bank of 8 Tracks on the SC Card  T   F9
-    B00000000
-};
-
-const byte sequence250[] = {
-//* 10th Bank of 8 Tracks on the SC Card  T    FA
-    B00000000
-};
-
-const byte sequence251[] = {
-//* 11th Bank of 8 Tracks on the SC Card  T    FB
-    B00000000
-};
-
-const byte sequence252[] = {
-//* 12th Bank of 8 Tracks on the SC Card  T    FC
-    B00000000
-};
-
-const byte sequence253[] = {
-//* 13th Bank of 8 Tracks on the SC Card  T    FD
-    B00000000
-};
-
-const byte sequence254[] = {
-//* 14th Bank of 8 Tracks on the SC Card  T     FE
-    B00000000
-};
-
-const byte sequence255[] = {
-//* 15th Bank of 8 Tracks on the SC Card  T   -120    FF
-    B00000000
-};
 
 const byte __attribute__((section(".sequences"))) *ptrSequences[] = {
     sequence0,
@@ -10671,23 +10591,7 @@ const byte __attribute__((section(".sequences"))) *ptrSequences[] = {
     sequence236,
     sequence237,
     sequence238,
-    sequence239,
-    sequence240,
-    sequence241,
-    sequence242,
-    sequence243,
-    sequence244,
-    sequence245,
-    sequence246,
-    sequence247,
-    sequence248,
-    sequence249,
-    sequence250,
-    sequence251,
-    sequence252,
-    sequence253,
-    sequence254,
-    sequence255
+    sequence239
 };
 
 const word sequenceLengths[] = {
@@ -10930,21 +10834,5 @@ const word sequenceLengths[] = {
     sizeof sequence236,
     sizeof sequence237,
     sizeof sequence238,
-    sizeof sequence239,
-    sizeof sequence240,
-    sizeof sequence241,
-    sizeof sequence242,
-    sizeof sequence243,
-    sizeof sequence244,
-    sizeof sequence245,
-    sizeof sequence246,
-    sizeof sequence247,
-    sizeof sequence248,
-    sizeof sequence249,
-    sizeof sequence250,
-    sizeof sequence251,
-    sizeof sequence252,
-    sizeof sequence253,
-    sizeof sequence254,
-    sizeof sequence255
+    sizeof sequence239
 };
