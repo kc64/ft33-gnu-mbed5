@@ -299,7 +299,7 @@ void ZCD_SD_Slave(void) {
     } 
 }
 
-void vfnLoadSequencesFromSD(void) {
+void vfnLoadSequencesFromSD(byte sequence) {
     /* Load one line at a time. Output each line in turn to the slaves. This is done to preserve memeory.
         NOT DONE YET */
     
@@ -321,22 +321,28 @@ void vfnLoadSequencesFromSD(void) {
         // if the SD card is present but not responding, reset and try again
         NVIC_SystemReset();
     } else {
-        
         while(fgets(line, 100, fp) != NULL) {
+			pc.printf(line);		// transmit to the slaves
+			
             if(line[0] == 'Q') {
                 sscanf(line, "%*s %d %d", &sequence_num, &steps);
-                ptr = (sDimStep *) malloc(sizeof(sDimStep) * steps);
-                if (ptr == NULL)
+                if(sequence_num == sequence)
                 {
-                    pc.printf("Out of memory while loading sequence %d from SD card\n", sequence_num);
-                    break;
+                    ptr = (sDimStep *) malloc(sizeof(sDimStep) * steps);
+                    if (ptr == NULL)
+                    {
+                        pc.printf("Out of memory while loading sequence %d from SD card\n", sequence_num);
+                        break;
 //                    while(1);
+                    }
+                    ptrDimSequences[seq] = ptr;
+                    DimSequenceLengths[seq] = steps;
                 }
-                ptrDimSequences[seq] = ptr;
-                DimSequenceLengths[seq] = steps;
                 seq++;
             } else if(line[0] == 'S') {
-                sscanf(line, "%*s %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u",
+                if(sequence_num == sequence)
+                {
+					sscanf(line, "%*s %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u",
                             &ticks,
                             &ChanStart[0], &ChanStop[0],
                             &ChanStart[1], &ChanStop[1],
@@ -347,44 +353,45 @@ void vfnLoadSequencesFromSD(void) {
                             &ChanStart[6], &ChanStop[6],
                             &ChanStart[7], &ChanStop[7]);
 
-                ptr->ticks = (unsigned char)(ticks & 0x000000FF);
+                    ptr->ticks = (unsigned char)(ticks & 0x000000FF);
                 
-                for (i = 0; i < 8; i++)
-                {
-                    ptr->Chan[i].start = (unsigned char)(ChanStart[i] & 0x000000FF);
-                    ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
+                    for (i = 0; i < 8; i++)
+                    {
+                        ptr->Chan[i].start = (unsigned char)(ChanStart[i] & 0x000000FF);
+                        ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
+                    }
+                    //for(i=0; i<8; i++) {            
+                    //    ptr->Chan[i].delta = (int) ptr->Chan[i].stop - (int) ptr->Chan[i].start;
+                    // }
+                    ptr++;
                 }
-                //for(i=0; i<8; i++) {            
-                //    ptr->Chan[i].delta = (int) ptr->Chan[i].stop - (int) ptr->Chan[i].start;
-               // }
-                ptr++;
             }  
         }
         fclose(fp);
     }
 }
 
-void vfnBroadcastSequences(void) {
-    
-    int seq;
-    unsigned int step;
-    int chan;
-    
-    pc.printf("N\n");
-    for(seq=0; seq<=15; seq++) {
-        ptrDimSequence = (sDimStep *) ptrDimSequences[seq];
-        sequenceLength = DimSequenceLengths[seq];
-        pc.printf("Q %02x %02x\n", seq, sequenceLength);
-        for(step=0; step < sequenceLength; step++) {
-            pc.printf("S ");
-            pc.printf("%02x ", ptrDimSequence[step].ticks);
-            for(chan=0; chan<8; chan++) {
-                pc.printf("%02x %02x ", ptrDimSequence[step].Chan[chan].start, ptrDimSequence[step].Chan[chan].stop);
-            }
-            pc.printf("\n");
-        }
-    }
-}
+// void vfnBroadcastSequences(void) {
+//     
+//     int seq;
+//     unsigned int step;
+//     int chan;
+//     
+//     pc.printf("N\n");
+//     for(seq=0; seq<=15; seq++) {
+//         ptrDimSequence = (sDimStep *) ptrDimSequences[seq];
+//         sequenceLength = DimSequenceLengths[seq];
+//         pc.printf("Q %02x %02x\n", seq, sequenceLength);
+//         for(step=0; step < sequenceLength; step++) {
+//             pc.printf("S ");
+//             pc.printf("%02x ", ptrDimSequence[step].ticks);
+//             for(chan=0; chan<8; chan++) {
+//                 pc.printf("%02x %02x ", ptrDimSequence[step].Chan[chan].start, ptrDimSequence[step].Chan[chan].stop);
+//             }
+//             pc.printf("\n");
+//         }
+//     }
+// }
 
 void vfnGetLine(void) {
     
@@ -554,9 +561,9 @@ int main() {
             #ifdef DEBUG
             pc.printf("\nSD found\n");
             #endif
-            vfnLoadSequencesFromSD();
+            vfnLoadSequencesFromSD(sequence);
             /* Broadcast all the SD card sequences. */
-            vfnBroadcastSequences();
+            // vfnBroadcastSequences();
         }
         #ifdef DEBUG
         else {
@@ -633,14 +640,7 @@ int main() {
         clocks = SLOWEST_TIME;
 
         while(1) {
-            // vfnGetLine();
-            
             __disable_irq();
-            // if( line[0] == 'Z') {
-            //    sscanf(line, "%*s %hhx", &current_step);
-                //pc.printf("\nStep: %s, %02x\n", line, current_step);
-            //    got_Z = 1;
-            // }
             sync_char = pc.getc();
             if (sync_char == 'R') {
                 got_R = 1;
