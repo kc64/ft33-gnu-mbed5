@@ -379,6 +379,7 @@ void vfnGetLine(void) {
 void vfnSlaveReceiveData(byte sequence) {
 
     int steps;
+    int step;
     sDimStep *ptr = NULL;
     unsigned int ticks;
     unsigned int ChanStart[8];
@@ -399,6 +400,7 @@ void vfnSlaveReceiveData(byte sequence) {
                 }
                 ptrDimSeq = ptr;
                 DimSeqLen = steps;
+                step = 0;
             }
         }
         else if(line[0] == 'S') {
@@ -419,6 +421,11 @@ void vfnSlaveReceiveData(byte sequence) {
                 for (i = 0; i < 8; i++) {
                     ptr->Chan[i].start = (unsigned char)(ChanStart[i] & 0x000000FF);
                     ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
+                }
+                
+                step += 1;
+                if (step >= steps) {
+                    break;
                 }
             }
         }              
