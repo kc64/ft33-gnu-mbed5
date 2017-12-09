@@ -6,8 +6,8 @@
 #include "sequences.h"
 #include "dim_steps.h"
 
-// #define DEBUG 0
-#ifdef DEBUG
+// #define FT_FT_DEBUG 0
+#ifdef FT_FT_DEBUG
 #warning "Using debug mode."
 #endif
 
@@ -87,6 +87,8 @@ int got_R = 0;
 char stmp[10];
 byte current_step, slave_channel;
 sDimStep *ptrDimSequence;
+sDimStep *ptrDimSeq = NULL;
+unsigned int DimSeqLen;
 int ok_to_switch;
 
 byte ticks = 0;
@@ -232,7 +234,7 @@ void TimeToSwitch(void) {
             step = 0;
         }
         /* Put out the Z sync to the slaves. This tells them to step there sequence. */
-        #ifdef DEBUG
+        #ifdef FT_DEBUG
         pc.printf("Z %02x\n", step);
         #endif
         // pc.putc('Z');
@@ -306,7 +308,6 @@ void vfnLoadSequencesFromSD(byte sequence) {
     
     FILE *fp;
     int steps;
-    int seq = 0;
     sDimStep *ptr = NULL;
     SDFileSystem sd(P1_22, P1_21, P1_20, P1_19, "sd"); // the pinout on the FT33 controller
     unsigned int ticks;
@@ -320,29 +321,26 @@ void vfnLoadSequencesFromSD(byte sequence) {
         pc.printf("No file. Restarting...\n");
         // if the SD card is present but not responding, reset and try again
         NVIC_SystemReset();
-    } else {
+    }
+    else {
         while(fgets(line, 100, fp) != NULL) {
-			pc.printf(line);		// transmit to the slaves
-			
+            pc.printf(line);        // transmit to the slaves
+            
             if(line[0] == 'Q') {
                 sscanf(line, "%*s %d %d", &sequence_num, &steps);
-                if(sequence_num == sequence)
-                {
+                if(sequence_num == sequence) {
                     ptr = (sDimStep *) malloc(sizeof(sDimStep) * steps);
-                    if (ptr == NULL)
-                    {
+                    if (ptr == NULL) {
                         pc.printf("Out of memory while loading sequence %d from SD card\n", sequence_num);
                         break;
-//                    while(1);
                     }
-                    ptrDimSequences[seq] = ptr;
-                    DimSequenceLengths[seq] = steps;
+                    ptrDimSeq = ptr;
+                    DimSeqLen = steps;
                 }
-                seq++;
-            } else if(line[0] == 'S') {
-                if(sequence_num == sequence)
-                {
-					sscanf(line, "%*s %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u",
+            }
+            else if(line[0] == 'S') {
+                if(sequence_num == sequence) {
+                    sscanf(line, "%*s %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u",
                             &ticks,
                             &ChanStart[0], &ChanStop[0],
                             &ChanStart[1], &ChanStop[1],
@@ -355,43 +353,16 @@ void vfnLoadSequencesFromSD(byte sequence) {
 
                     ptr->ticks = (unsigned char)(ticks & 0x000000FF);
                 
-                    for (i = 0; i < 8; i++)
-                    {
+                    for (i = 0; i < 8; i++) {
                         ptr->Chan[i].start = (unsigned char)(ChanStart[i] & 0x000000FF);
                         ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
                     }
-                    //for(i=0; i<8; i++) {            
-                    //    ptr->Chan[i].delta = (int) ptr->Chan[i].stop - (int) ptr->Chan[i].start;
-                    // }
-                    ptr++;
                 }
             }  
         }
         fclose(fp);
     }
 }
-
-// void vfnBroadcastSequences(void) {
-//     
-//     int seq;
-//     unsigned int step;
-//     int chan;
-//     
-//     pc.printf("N\n");
-//     for(seq=0; seq<=15; seq++) {
-//         ptrDimSequence = (sDimStep *) ptrDimSequences[seq];
-//         sequenceLength = DimSequenceLengths[seq];
-//         pc.printf("Q %02x %02x\n", seq, sequenceLength);
-//         for(step=0; step < sequenceLength; step++) {
-//             pc.printf("S ");
-//             pc.printf("%02x ", ptrDimSequence[step].ticks);
-//             for(chan=0; chan<8; chan++) {
-//                 pc.printf("%02x %02x ", ptrDimSequence[step].Chan[chan].start, ptrDimSequence[step].Chan[chan].stop);
-//             }
-//             pc.printf("\n");
-//         }
-//     }
-// }
 
 void vfnGetLine(void) {
     
@@ -403,115 +374,56 @@ void vfnGetLine(void) {
         num++;
     }
     line[num] = 0x00;
-    // pc.printf("%s\n", line);
 }
 
-void vfnSlaveReceiveData(void) {
+void vfnSlaveReceiveData(byte sequence) {
 
-    #define MASTER 0
-    #define SEQUENCE 1
-    #define Q 3
-    #define S 4
-    
-    #define FINISHED 255
-    
-    int state = MASTER;
-    word num_steps;
-    word step_number=0;
+    int steps;
     sDimStep *ptr = NULL;
-    byte seq_num = 0;
-    //byte chan;
     unsigned int ticks;
     unsigned int ChanStart[8];
     unsigned int ChanStop[8];
     unsigned int i;
     unsigned int sequence_num;
 
-    while(state != FINISHED) {
-        vfnGetLine(); 
+    while(1) {
+        vfnGetLine();
         
-        switch(state) {
-            case MASTER:
-                if(strcmp(line, "Master") == 0) {
-                    state = Q;
-                    //pc.putc('M');
+        if(line[0] == 'Q') {
+            sscanf(line, "%*s %d %d", &sequence_num, &steps);
+            if(sequence_num == sequence) {
+                ptr = (sDimStep *) malloc(sizeof(sDimStep) * steps);
+                if (ptr == NULL) {
+                    pc.printf("Out of memory while loading sequence %d from SD card\n", sequence_num);
+                    break;
                 }
-                break;
-                
-            case Q:
-                if(strncmp(line, "Q", 1) == 0) {
-                    sscanf(line, "%*s %x %x", &sequence_num, &num_steps);
-                    seq_num = (byte)(sequence_num & 0x000000FF);
-                    //pc.printf("\nseq_num: %hhx, num_steps: %x\n", seq_num, num_steps);
-                    state = S;
-                    step_number = 0;
-                    ptr = (sDimStep *) malloc(sizeof(sDimStep) * num_steps);
-                    if(ptr==NULL) {
-                        pc.printf("Out of memory while receiving sequence %d from radio\n", sequence_num);
-                        while(1);
-                    }
-                    ptrDimSequences[seq_num] = ptr;
-                    DimSequenceLengths[seq_num] = num_steps;
-                    //pc.putc('Q');
-                }    
-                break;
+                ptrDimSeq = ptr;
+                DimSeqLen = steps;
+            }
+        }
+        else if(line[0] == 'S') {
+            if(sequence_num == sequence) {
+                sscanf(line, "%*s %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %u",
+                        &ticks,
+                        &ChanStart[0], &ChanStop[0],
+                        &ChanStart[1], &ChanStop[1],
+                        &ChanStart[2], &ChanStop[2],
+                        &ChanStart[3], &ChanStop[3],
+                        &ChanStart[4], &ChanStop[4],
+                        &ChanStart[5], &ChanStop[5],
+                        &ChanStart[6], &ChanStop[6],
+                        &ChanStart[7], &ChanStop[7]);
+
+                ptr->ticks = (unsigned char)(ticks & 0x000000FF);
             
-            case S:
-                if(strncmp(line, "S", 1) == 0) {
-                    //pc.printf("\nline: %s\n", line);
-                    sscanf(line, "%*s %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x %x",
-                                 &ticks,
-                                 &ChanStart[0], &ChanStop[0],
-                                 &ChanStart[1], &ChanStop[1],
-                                 &ChanStart[2], &ChanStop[2],
-                                 &ChanStart[3], &ChanStop[3],
-                                 &ChanStart[4], &ChanStop[4],
-                                 &ChanStart[5], &ChanStop[5],
-                                 &ChanStart[6], &ChanStop[6],
-                                 &ChanStart[7], &ChanStop[7]);    
-                    
-                    ptr->ticks = (unsigned char)(ticks & 0x000000FF);
-                
-                    for (i = 0; i < 8; i++)
-                    {
-                        ptr->Chan[i].start = (unsigned char)(ChanStart[i] & 0x000000FF);
-                        ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
-                    }
-                
-                    //pc.printf("\nSlave: ");
-                    //for(chan=0; chan<16; chan++) {
-                    //    pc.printf("%02x ", ptr->Chan[chan]);
-                    //}      
-                    //pc.putc('\n');
-                    
-                    step_number++;
-                    ptr++;
-                    if(step_number == num_steps) {
-                        if(seq_num == 15) {
-                            state = SEQUENCE;
-                        } else {
-                            state = Q;
-                            seq_num++;
-                             //pc.putc('s');
-                        }
-                    } else {
-                        state = S;
-                        //pc.putc('S');
-                    }
-                }                    
-                break; 
-                         
-            case SEQUENCE:
-                if(strncmp(line, "sequence", 8) == 0) {
-                    sscanf(line, "%*s %hhx", &master_sequence);
-                    pc.printf("\nseq: %hhx\n", master_sequence);
-                    state = FINISHED;
+                for (i = 0; i < 8; i++) {
+                    ptr->Chan[i].start = (unsigned char)(ChanStart[i] & 0x000000FF);
+                    ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
                 }
-                break;
-        }   
-            
+            }
+        }              
     }
-}    
+}   
     
 int main() {
 
@@ -535,6 +447,7 @@ int main() {
     
     dipswitch.mode(PullUp);
     dipswitch.input();
+    sequence = dipswitch.read();
 
     lights.write(0xFF); /* all off */
     /* Wait for the XBEE radio to get ready. It takes a while. */
@@ -552,35 +465,28 @@ int main() {
     /* Check master/slave and if a slave should use it's own sequence selection or get 
         it from a master. */
     if(master_slave.read() == 1) {
-        /* Read the dipswitch */
-        sequence = dipswitch.read();
-
         pc.printf("\nMaster\n");
 
         if (sd) {
-            #ifdef DEBUG
+            #ifdef FT_DEBUG
             pc.printf("\nSD found\n");
             #endif
             vfnLoadSequencesFromSD(sequence);
-            /* Broadcast all the SD card sequences. */
-            // vfnBroadcastSequences();
         }
-        #ifdef DEBUG
+        #ifdef FT_DEBUG
         else {
             pc.printf("\nNo SD found\n");
         }
         #endif
 
-        pc.printf("sequence: %02x\n", sequence);
         if(sequence < 240) {
             ptrSequence = (byte *) ptrSequences[sequence];
             sequenceLength = sequenceLengths[sequence];
             tkr_Timer.attach_us(&ZCD, 8333);
         }
         else {
-            sequence = sequence - 240;
-            ptrDimSequence = (sDimStep *) ptrDimSequences[sequence];
-            sequenceLength = DimSequenceLengths[sequence];
+            ptrDimSequence = ptrDimSeq;
+            sequenceLength = DimSeqLen;
             
             //tkr_Timer.attach_us(&ZCD_SD, 8333);
             /* This sets an interupt when a zero cross is detected. */
@@ -604,24 +510,9 @@ int main() {
     }
     else {
         /* This is a slave board. */
-        #ifdef DEBUG
+        #ifdef FT_DEBUG
         pc.printf("Slave\n");
         #endif
-
-        if(local_slave_data.read() == 1) {
-            vfnSlaveReceiveData();
-            sequence = master_sequence;    
-            #ifdef DEBUG
-            pc.printf("Use master data %d\n", sequence);
-            #endif
-        }
-        else {
-            /* Read the dipswitch */
-            sequence = dipswitch.read();
-            #ifdef DEBUG
-            pc.printf("Use slave seqence %d\n", sequence);
-            #endif
-        }
 
         if(sequence < 240) {
             ptrSequence = (byte *) ptrSequences[sequence];
@@ -630,9 +521,9 @@ int main() {
             tkr_Timer.attach_us(&ZCD_Slave, 8333);
         }
         else {
-            sequence = sequence - 240;
-            ptrDimSequence = (sDimStep *) ptrDimSequences[sequence];
-            sequenceLength = DimSequenceLengths[sequence];
+            vfnSlaveReceiveData(sequence);
+            ptrDimSequence = ptrDimSeq;
+            sequenceLength = DimSeqLen;
                                   
             tkr_Timer.attach_us(&ZCD_SD_Slave, 8333);
         }

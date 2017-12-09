@@ -4,7 +4,7 @@
 ###############################################################################
 # Boiler-plate
 
-DEBUG ?= 0
+DEBUG ?= 1
 MBED_OS_DIR := mbed-dev
 FAT_FILESYSTEM_DIR := FATFileSystem
 SD_FILESYSTEM_DIR := SDFileSystem
