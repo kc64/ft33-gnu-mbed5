@@ -26,11 +26,11 @@
 Serial pc(P1_13, P1_14); // tx, rx
 
 InterruptIn int_ZCD(P0_2);
-Timeout tmo_FastInt;
+// Timeout tmo_FastInt;
 Ticker tkr_Timer;
-Timeout tmo_ZCD_sync;
+// Timeout tmo_ZCD_sync;
 Ticker tkr_FastInt;
-Timeout tmo_switch;
+// Timeout tmo_switch;
 
 /* Determines the fastest and slowest sequence step timing. Times are in
     1/60th of a second (one clock).*/
@@ -44,6 +44,9 @@ exponetial curve that mimics the desired response. */
 #define A_COEFF 0.0207
 #define B_COEFF 3.9
 #define C_COEFF -0.0207
+
+#define SLICE 65  // usec for 256 slices of a full AC cycle
+#define HALF_CYCLE 8333     // usec for one half cycle of 60Hz power
 
 /* The potentiometer input port to select the speed of the sequence steps. */
 AnalogIn potentiometer(P0_11);
@@ -89,12 +92,12 @@ byte current_step, slave_channel;
 sDimStep *ptrDimSequence;
 sDimStep *ptrDimSeq = NULL;
 unsigned int DimSeqLen;
-int ok_to_switch;
 
 byte ticks = 0;
 
 /* The dimmer timers for each channel. */
-uint8_t Dimmer[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+byte Dimmer[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
 /* Scaled version of the the dimmer for fixed point calculations. */
 int Dimmer_sc[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
@@ -151,7 +154,7 @@ void ZCD_Slave(void) {
 }
 
 /* This routine is called about 255 times every 1/60 of a second. It is our chance to turn on a 
-    channel based on the dimmer value. Dimmer is calculated at each good zero cross in TimeToSwitch(). */
+    channel based on the dimmer value. Dimmer is calculated at each good zero cross in ZCD_SD. */
 void tmr_Main(void) {
     
     if (Dimmer[0] != 0) {
@@ -196,35 +199,22 @@ void tmr_Main(void) {
     }
 }
 
-/* Sync to every other zero cross. See ZCD_SD() below.*/
-void sync(void) {
-    
-    ok_to_switch = TRUE;
-    
-}
-
-/* Actually switch everything off. We are at a zero cross. Check th speed setting, find next ticks and steps. 
+/* Switch all channels off. A zero crossing has just passed. Check the speed setting, find next ticks and steps. 
    Calculate the new dimmer setting based on the start and stop values. */
    
-void TimeToSwitch(void) {
+void ZCD_SD(void) {
     int i;
     
-    tkr_FastInt.attach_us(NULL, 66);    
-    C0 = 1;
-    C1 = 1;
-    C2 = 1;
-    C3 = 1;
-    C4 = 1;
-    C5 = 1;
-    C6 = 1;
-    C7 = 1;
+    tkr_FastInt.attach_us(NULL, SLICE);    // detach (disable) interrutpt
+    lights = 0xFF;      // C0-C7 all off
+    
     /* A clock is a zero cross (1/60 second). */
     clocks++;
     /* We need speed_clks number of clocks before we tick. speed_clks is from the speed pot. */
     if(clocks > speed_clks) {
         clocks = 0;
         ticks++;
-        /* If we tick enough times for this step, goto the nect step. */
+        /* If we tick enough times for this step, goto the next step. */
         if (ticks >= ptrDimSequence[step].ticks) {
             step++;
             ticks = 0;
@@ -233,47 +223,27 @@ void TimeToSwitch(void) {
         if(step >= sequenceLength) {
             step = 0;
         }
-        /* Put out the Z sync to the slaves. This tells them to step there sequence. */
-        #ifdef FT_DEBUG
-        pc.printf("Z %02x\n", step);
-        #endif
-        // pc.putc('Z');
+        /* Put out the Z sync to the slaves. This tells them to step their sequence. */
+        pc.putc('Z');
 
         for(i=0; i<8; i++) {
-            Dimmer[i] = ptrDimSequence[step].Chan[i].start;
+            Dimmer[i] = 255 - ptrDimSequence[step].Chan[i].start;   // this is a down counter so start high for low values
         }
-    } else {
+    }
+    else {
         /* If we don't need to tick or step, then find the new dimmer values for the next 1/60 second clock. This calcuation is a simple linear interperloation
             between the start and stop. At each 1/60 second interval we recalc the dimmer value along the line. */
         for(i=0; i<8; i++) {
-            Dimmer[i] = ptrDimSequence[step].Chan[i].start + (((clocks << 8)/speed_clks * (ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start)) >> 8);
+            Dimmer[i] = 255 - (ptrDimSequence[step].Chan[i].start + (((clocks << 8)/speed_clks * (ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start)) >> 8));
         }   
     }    
     /* Timer for the 255 step dimmer reoutine. */
-    tkr_FastInt.attach_us(&tmr_Main, 66);
+    tkr_FastInt.attach_us(&tmr_Main, SLICE);
     
     #ifdef VERBOSE
     //pc.printf("Z. clocks: %d, speed_clks: %d\n\r", clocks, speed_clks);
     #endif
 
-}
-
-/* Interrupt routine that is called by the master ion a zero cross event. */       
-void ZCD_SD(void) {
-
-    /* Check if it's ok to actually switch. The zero cross is only reliable in one direction of the sine wave
-        crossing of zero. The sync routine delays the next good zero cross detection by 14ms. Once a zero cross
-        happens, and the ok_to_switch flag is true, every other zero cross will be detected from that point on. */
-    if (ok_to_switch) {
-        
-        ok_to_switch = FALSE;
-        /* Don't actually switch here. We are too late. The zero cross happened a few 100 us ago. Wait until the next zero cross.
-           This 8ms had been timed to be pretty close from observation on a scope. If you change this routine, you might 
-           need to retune this number. */
-        tmo_switch.attach(&TimeToSwitch, 0.008);
-        /* Set up ok_to_switch routine to catch every other zero cross. */
-        tmo_ZCD_sync.attach(&sync, 0.014);  
-    }
 }
 
 void ZCD_SD_Slave(void) {
@@ -302,10 +272,7 @@ void ZCD_SD_Slave(void) {
 }
 
 void vfnLoadSequencesFromSD(byte sequence) {
-    /* Load one line at a time. Output each line in turn to the slaves. This is done to preserve memeory.
-        NOT DONE YET */
-    
-    
+
     FILE *fp;
     int steps;
     sDimStep *ptr = NULL;
@@ -431,16 +398,17 @@ void vfnSlaveReceiveData(byte sequence) {
         }              
     }
 }   
-    
+
+
 int main() {
 
-    byte sequence;          /* The current sequence. */
-    byte i;
+    byte sequence;
     byte sd;
     byte sync_char;
 
     /* Basic initialization. */
-    ok_to_switch = TRUE;
+    lights.write(0xFF); /* all off */
+    
     clocks = 0;
     speed_clks = FASTEST_TIME;
     
@@ -456,12 +424,13 @@ int main() {
     dipswitch.input();
     sequence = dipswitch.read();
 
-    lights.write(0xFF); /* all off */
+#if 0
     /* Wait for the XBEE radio to get ready. It takes a while. */
-    for(i=0xFF; i>=0xF4; i--) {
+    for(byte i=0xFF; i>=0xF4; i--) {
         wait(1.0);
 //        lights = i;
     }
+#endif
     
     sd_present.mode(PullUp);
     sd_present.input();
@@ -472,32 +441,21 @@ int main() {
     /* Check master/slave and if a slave should use it's own sequence selection or get 
         it from a master. */
     if(master_slave.read() == 1) {
-        pc.printf("\nMaster\n");
-
         if (sd) {
-            #ifdef FT_DEBUG
-            pc.printf("\nSD found\n");
-            #endif
             vfnLoadSequencesFromSD(sequence);
         }
-        #ifdef FT_DEBUG
-        else {
-            pc.printf("\nNo SD found\n");
-        }
-        #endif
 
         if(sequence < 240) {
             ptrSequence = (byte *) ptrSequences[sequence];
             sequenceLength = sequenceLengths[sequence];
-            tkr_Timer.attach_us(&ZCD, 8333);
+            tkr_Timer.attach_us(&ZCD, HALF_CYCLE);
         }
         else {
             ptrDimSequence = ptrDimSeq;
             sequenceLength = DimSeqLen;
             
-            //tkr_Timer.attach_us(&ZCD_SD, 8333);
             /* This sets an interupt when a zero cross is detected. */
-            int_ZCD.rise(&ZCD_SD);
+            int_ZCD.fall(&ZCD_SD);
         }
 
         clocks = SLOWEST_TIME;
@@ -525,20 +483,20 @@ int main() {
             ptrSequence = (byte *) ptrSequences[sequence];
             sequenceLength = sequenceLengths[sequence];
             
-            tkr_Timer.attach_us(&ZCD_Slave, 8333);
+            tkr_Timer.attach_us(&ZCD_Slave, HALF_CYCLE);
         }
         else {
             vfnSlaveReceiveData(sequence);
             ptrDimSequence = ptrDimSeq;
             sequenceLength = DimSeqLen;
                                   
-            tkr_Timer.attach_us(&ZCD_SD_Slave, 8333);
+            tkr_Timer.attach_us(&ZCD_SD_Slave, HALF_CYCLE);
         }
 
         clocks = SLOWEST_TIME;
 
         while(1) {
-            __disable_irq();
+            // __disable_irq();
             sync_char = pc.getc();
             if (sync_char == 'R') {
                 got_R = 1;
@@ -546,7 +504,7 @@ int main() {
             else if (sync_char == 'Z') {
                 got_Z = 1;
             }
-            __enable_irq();
+            // __enable_irq();
         }
     }
 }
