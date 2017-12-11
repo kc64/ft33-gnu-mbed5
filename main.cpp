@@ -324,6 +324,8 @@ void vfnLoadSequencesFromSD(byte sequence) {
                         ptr->Chan[i].start = (unsigned char)(ChanStart[i] & 0x000000FF);
                         ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
                     }
+                    
+                    ptr++;
                 }
             }  
         }
@@ -389,6 +391,8 @@ void vfnSlaveReceiveData(byte sequence) {
                     ptr->Chan[i].start = (unsigned char)(ChanStart[i] & 0x000000FF);
                     ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
                 }
+                
+                ptr++
                 
                 step += 1;
                 if (step >= steps) {
