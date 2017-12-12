@@ -392,7 +392,7 @@ void vfnSlaveReceiveData(byte sequence) {
                     ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
                 }
                 
-                ptr++
+                ptr++;
                 
                 step += 1;
                 if (step >= steps) {
