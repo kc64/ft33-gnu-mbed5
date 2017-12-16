@@ -26,11 +26,8 @@
 Serial pc(P1_13, P1_14); // tx, rx
 
 InterruptIn int_ZCD(P0_2);
-// Timeout tmo_FastInt;
 Ticker tkr_Timer;
-// Timeout tmo_ZCD_sync;
 Ticker tkr_FastInt;
-// Timeout tmo_switch;
 
 /* Determines the fastest and slowest sequence step timing. Times are in
     1/60th of a second (one clock).*/
@@ -46,6 +43,7 @@ exponetial curve that mimics the desired response. */
 #define C_COEFF -0.0207
 
 #define SLICE 65  // usec for 256 slices of a full AC cycle
+#define MAX_SLICE 225   // how many slices to allow in a full AC cycle
 #define HALF_CYCLE 8333     // usec for one half cycle of 60Hz power
 
 /* The potentiometer input port to select the speed of the sequence steps. */
@@ -94,6 +92,7 @@ sDimStep *ptrDimSeq = NULL;
 unsigned int DimSeqLen;
 
 byte ticks = 0;
+byte zc_slice = 0;
 
 /* The dimmer timers for each channel. */
 byte Dimmer[8] = {0, 0, 0, 0, 0, 0, 0, 0};
@@ -157,45 +156,56 @@ void ZCD_Slave(void) {
     channel based on the dimmer value. Dimmer is calculated at each good zero cross in ZCD_SD. */
 void tmr_Main(void) {
     
-    if (Dimmer[0] != 0) {
-        Dimmer[0]--;
-    } else {
-        C0 = 0;
+    extern ZCD_SD;
+    
+    if (zc_slice > MAX_SLICE) {
+        lights = 0xFF;      // C0-C7 all off
+        zc_slice = 0;
+        int_ZCD.fall(&ZCD_SD);
     }
-    if (Dimmer[1] != 0) {
-        Dimmer[1]--;
-    } else {
-        C1 = 0;
-    }
-    if (Dimmer[2] != 0) {
-        Dimmer[2]--;
-    } else {
-        C2 = 0;
-    }
-    if (Dimmer[3] != 0) {
-        Dimmer[3]--;
-    } else {
-        C3 = 0;
-    }
-    if (Dimmer[4] != 0) {
-        Dimmer[4]--;
-    } else {
-        C4 = 0;
-    }
-    if (Dimmer[5] != 0) {
-        Dimmer[5]--;
-    } else {
-        C5 = 0;
-    }
-    if (Dimmer[6] != 0) {
-        Dimmer[6]--;
-    } else {
-        C6 = 0;
-    }
-    if (Dimmer[7] != 0) {
-        Dimmer[7]--;
-    } else {
-        C7 = 0;
+    else {
+        zc_slice++;
+        
+        if (Dimmer[0] != 0) {
+            Dimmer[0]--;
+        } else {
+            C0 = 0;
+        }
+        if (Dimmer[1] != 0) {
+            Dimmer[1]--;
+        } else {
+            C1 = 0;
+        }
+        if (Dimmer[2] != 0) {
+            Dimmer[2]--;
+        } else {
+            C2 = 0;
+        }
+        if (Dimmer[3] != 0) {
+            Dimmer[3]--;
+        } else {
+            C3 = 0;
+        }
+        if (Dimmer[4] != 0) {
+            Dimmer[4]--;
+        } else {
+            C4 = 0;
+        }
+        if (Dimmer[5] != 0) {
+            Dimmer[5]--;
+        } else {
+            C5 = 0;
+        }
+        if (Dimmer[6] != 0) {
+            Dimmer[6]--;
+        } else {
+            C6 = 0;
+        }
+        if (Dimmer[7] != 0) {
+            Dimmer[7]--;
+        } else {
+            C7 = 0;
+        }
     }
 }
 
@@ -205,8 +215,8 @@ void tmr_Main(void) {
 void ZCD_SD(void) {
     int i;
     
-    tkr_FastInt.attach_us(NULL, SLICE);    // detach (disable) interrutpt
-    lights = 0xFF;      // C0-C7 all off
+    int_ZCD.fall(NULL);                    // disable this ZCD interrupt
+    tkr_FastInt.attach_us(NULL, SLICE);    // disable slicer interrutpt
     
     /* A clock is a zero cross (1/60 second). */
     clocks++;
@@ -239,7 +249,7 @@ void ZCD_SD(void) {
     }    
     /* Timer for the 255 step dimmer reoutine. */
     tkr_FastInt.attach_us(&tmr_Main, SLICE);
-    
+
     #ifdef VERBOSE
     //pc.printf("Z. clocks: %d, speed_clks: %d\n\r", clocks, speed_clks);
     #endif
@@ -324,7 +334,6 @@ void vfnLoadSequencesFromSD(byte sequence) {
                         ptr->Chan[i].start = (unsigned char)(ChanStart[i] & 0x000000FF);
                         ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
                     }
-                    
                     ptr++;
                 }
             }  
@@ -392,9 +401,15 @@ void vfnSlaveReceiveData(byte sequence) {
                     ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
                 }
                 
+<<<<<<< .mine
+                ptr++;                
+                step++;
+||||||| .r9
+                ptr++
+=======
                 ptr++;
+>>>>>>> .r10
                 
-                step += 1;
                 if (step >= steps) {
                     break;
                 }
