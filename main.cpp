@@ -97,6 +97,8 @@ byte zc_slice = 0;
 /* The dimmer timers for each channel. */
 byte Dimmer[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
+void ZCD_SD(void);
+
 /* Scaled version of the the dimmer for fixed point calculations. */
 int Dimmer_sc[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
@@ -155,9 +157,7 @@ void ZCD_Slave(void) {
 /* This routine is called about 255 times every 1/60 of a second. It is our chance to turn on a 
     channel based on the dimmer value. Dimmer is calculated at each good zero cross in ZCD_SD. */
 void tmr_Main(void) {
-    
-    extern ZCD_SD;
-    
+
     if (zc_slice > MAX_SLICE) {
         lights = 0xFF;      // C0-C7 all off
         zc_slice = 0;
@@ -401,14 +401,8 @@ void vfnSlaveReceiveData(byte sequence) {
                     ptr->Chan[i].stop  = (unsigned char)(ChanStop[i]  & 0x000000FF);
                 }
                 
-<<<<<<< .mine
                 ptr++;                
                 step++;
-||||||| .r9
-                ptr++
-=======
-                ptr++;
->>>>>>> .r10
                 
                 if (step >= steps) {
                     break;
