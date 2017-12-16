@@ -43,7 +43,7 @@ exponetial curve that mimics the desired response. */
 #define C_COEFF -0.0207
 
 #define SLICE 65  // usec for 256 slices of a full AC cycle
-#define MAX_SLICE 225   // how many slices to allow in a full AC cycle
+#define MAX_SLICE 200   // how many slices to allow in a full AC cycle
 #define HALF_CYCLE 8333     // usec for one half cycle of 60Hz power
 
 /* The potentiometer input port to select the speed of the sequence steps. */
@@ -159,11 +159,12 @@ void ZCD_Slave(void) {
 void tmr_Main(void) {
 
     if (zc_slice > MAX_SLICE) {
-        lights = 0xFF;      // C0-C7 all off
-        zc_slice = 0;
-        int_ZCD.fall(&ZCD_SD);
+        lights = 0xFF;              // C0-C7 all off
+        zc_slice = 0;               // clear the slice counter for the next cycle
+        tkr_FastInt.attach_us(NULL, SLICE);    // disable this timer interrupt
+        int_ZCD.fall(&ZCD_SD);      // enable the zero crossing interrupt since we're done dimming for this cycle
     }
-    else {
+    else {                          // we're still dimming so adjust every channel's slice counter
         zc_slice++;
         
         if (Dimmer[0] != 0) {
@@ -216,7 +217,6 @@ void ZCD_SD(void) {
     int i;
     
     int_ZCD.fall(NULL);                    // disable this ZCD interrupt
-    tkr_FastInt.attach_us(NULL, SLICE);    // disable slicer interrutpt
     
     /* A clock is a zero cross (1/60 second). */
     clocks++;
@@ -247,6 +247,7 @@ void ZCD_SD(void) {
             Dimmer[i] = 255 - (ptrDimSequence[step].Chan[i].start + (((clocks << 8)/speed_clks * (ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start)) >> 8));
         }   
     }    
+    
     /* Timer for the 255 step dimmer reoutine. */
     tkr_FastInt.attach_us(&tmr_Main, SLICE);
 
