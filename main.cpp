@@ -161,7 +161,7 @@ void tmr_Main(void) {
     if (zc_slice > MAX_SLICE) {
         lights = 0xFF;              // C0-C7 all off
         zc_slice = 0;               // clear the slice counter for the next cycle
-        tkr_FastInt.attach_us(NULL, SLICE);    // disable this timer interrupt
+        tkr_FastInt.detach();    // disable this timer interrupt
         int_ZCD.fall(&ZCD_SD);      // enable the zero crossing interrupt since we're done dimming for this cycle
     }
     else {                          // we're still dimming so adjust every channel's slice counter
