@@ -43,7 +43,7 @@ exponetial curve that mimics the desired response. */
 #define C_COEFF -0.0207
 
 #define SLICE 65  // usec for 256 slices of a full AC cycle
-#define MAX_SLICE 200   // how many slices to allow in a full AC cycle
+#define MAX_SLICE 240   // how many slices to allow in a full AC cycle
 #define HALF_CYCLE 8333     // usec for one half cycle of 60Hz power
 
 /* The potentiometer input port to select the speed of the sequence steps. */
