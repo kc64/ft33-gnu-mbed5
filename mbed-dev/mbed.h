@@ -16,13 +16,13 @@
 #ifndef MBED_H
 #define MBED_H
 
-#define MBED_LIBRARY_VERSION 151
+#define MBED_LIBRARY_VERSION 158
 
 #if MBED_CONF_RTOS_PRESENT
 // RTOS present, this is valid only for mbed OS 5
 #define MBED_MAJOR_VERSION 5
-#define MBED_MINOR_VERSION 5
-#define MBED_PATCH_VERSION 7
+#define MBED_MINOR_VERSION 7
+#define MBED_PATCH_VERSION 3
 
 #else
 // mbed 2
@@ -32,8 +32,7 @@
 #endif
 
 #define MBED_ENCODE_VERSION(major, minor, patch) ((major)*10000 + (minor)*100 + (patch))
-#define MBED_VERSION MBED_ENCODE_VERSION(MBED_MAJOR_VERSION, MBED_MINOR_VERSION, MBED_PATCH_VERSION)
-
+#define MBED_VERSION MBED_ENCODE_VERSION(MBED_MAJOR_VERSION, MBED_MINOR_VERSION, MBED_PATCH_VERSION)        
 #if MBED_CONF_RTOS_PRESENT
 #include "rtos/rtos.h"
 #endif
@@ -107,6 +106,8 @@
 #include "platform/FileSystemHandle.h"
 #include "platform/FileHandle.h"
 #include "platform/DirHandle.h"
+#include "platform/CriticalSectionLock.h"
+#include "platform/DeepSleepLock.h"
 
 // mbed Non-hardware components
 #include "platform/Callback.h"

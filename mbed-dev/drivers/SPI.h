@@ -156,6 +156,8 @@ public:
 
     /** Start non-blocking SPI transfer using 8bit buffers.
      *
+     * This function locks the deep sleep until any event has occured
+     * 
      * @param tx_buffer The TX buffer with data to be transfered. If NULL is passed,
      *                  the default SPI value is sent
      * @param tx_length The length of TX buffer in bytes
@@ -244,6 +246,14 @@ protected:
     */
     void start_transfer(const void *tx_buffer, int tx_length, void *rx_buffer, int rx_length, unsigned char bit_width, const event_callback_t& callback, int event);
 
+private:
+    /** Lock deep sleep only if it is not yet locked */
+    void lock_deep_sleep();
+
+    /** Unlock deep sleep in case it is locked */
+    void unlock_deep_sleep();
+
+
 #if TRANSACTION_QUEUE_SIZE_SPI
 
     /** Start a new transaction
@@ -272,6 +282,7 @@ protected:
     CThunk<SPI> _irq;
     event_callback_t _callback;
     DMAUsage _usage;
+    bool _deep_sleep_locked;
 #endif
 
     void aquire(void);

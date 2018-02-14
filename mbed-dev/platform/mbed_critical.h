@@ -1,6 +1,4 @@
 
-/** \addtogroup platform */
-/** @{*/
 /*
  * Copyright (c) 2015-2016, ARM Limited, All Rights Reserved
  * SPDX-License-Identifier: Apache-2.0
@@ -29,6 +27,12 @@
 extern "C" {
 #endif
 
+/** \addtogroup platform */
+/** @{*/
+/**
+ * \defgroup platform_critical critical section function
+ * @{
+ */
 
 /** Determine the current interrupts enabled state
   *
@@ -117,7 +121,7 @@ void core_util_critical_section_exit(void);
  * }
  *
  * @note: In the failure case (where the destination isn't set), the value
- * pointed to by expectedCurrentValue is still updated with the current value.
+ * pointed to by expectedCurrentValue is instead updated with the current value.
  * This property helps writing concise code for the following incr:
  *
  * function incr(p : pointer to int, a : int) returns int {
@@ -128,6 +132,10 @@ void core_util_critical_section_exit(void);
  *     }
  *     return value + a
  * }
+ *
+ * @note: This corresponds to the C11 "atomic_compare_exchange_strong" - it
+ * always succeeds if the current value is expected, as per the pseudocode
+ * above; it will not spuriously fail as "atomic_compare_exchange_weak" may.
  */
 bool core_util_atomic_cas_u8(uint8_t *ptr, uint8_t *expectedCurrentValue, uint8_t desiredValue);
 
@@ -170,7 +178,7 @@ bool core_util_atomic_cas_u8(uint8_t *ptr, uint8_t *expectedCurrentValue, uint8_
  * }
  *
  * @note: In the failure case (where the destination isn't set), the value
- * pointed to by expectedCurrentValue is still updated with the current value.
+ * pointed to by expectedCurrentValue is instead updated with the current value.
  * This property helps writing concise code for the following incr:
  *
  * function incr(p : pointer to int, a : int) returns int {
@@ -181,6 +189,10 @@ bool core_util_atomic_cas_u8(uint8_t *ptr, uint8_t *expectedCurrentValue, uint8_
  *     }
  *     return value + a
  * }
+ *
+ * @note: This corresponds to the C11 "atomic_compare_exchange_strong" - it
+ * always succeeds if the current value is expected, as per the pseudocode
+ * above; it will not spuriously fail as "atomic_compare_exchange_weak" may.
  */
 bool core_util_atomic_cas_u16(uint16_t *ptr, uint16_t *expectedCurrentValue, uint16_t desiredValue);
 
@@ -223,7 +235,7 @@ bool core_util_atomic_cas_u16(uint16_t *ptr, uint16_t *expectedCurrentValue, uin
  * }
  *
  * @note: In the failure case (where the destination isn't set), the value
- * pointed to by expectedCurrentValue is still updated with the current value.
+ * pointed to by expectedCurrentValue is instead updated with the current value.
  * This property helps writing concise code for the following incr:
  *
  * function incr(p : pointer to int, a : int) returns int {
@@ -233,6 +245,10 @@ bool core_util_atomic_cas_u16(uint16_t *ptr, uint16_t *expectedCurrentValue, uin
  *         done = atomic_cas(p, &value, value + a) // *value gets updated automatically until success
  *     }
  *     return value + a
+ *
+ * @note: This corresponds to the C11 "atomic_compare_exchange_strong" - it
+ * always succeeds if the current value is expected, as per the pseudocode
+ * above; it will not spuriously fail as "atomic_compare_exchange_weak" may.
  * }
  */
 bool core_util_atomic_cas_u32(uint32_t *ptr, uint32_t *expectedCurrentValue, uint32_t desiredValue);
@@ -276,7 +292,7 @@ bool core_util_atomic_cas_u32(uint32_t *ptr, uint32_t *expectedCurrentValue, uin
  * }
  *
  * @note: In the failure case (where the destination isn't set), the value
- * pointed to by expectedCurrentValue is still updated with the current value.
+ * pointed to by expectedCurrentValue is instead updated with the current value.
  * This property helps writing concise code for the following incr:
  *
  * function incr(p : pointer to int, a : int) returns int {
@@ -287,6 +303,10 @@ bool core_util_atomic_cas_u32(uint32_t *ptr, uint32_t *expectedCurrentValue, uin
  *     }
  *     return value + a
  * }
+ *
+ * @note: This corresponds to the C11 "atomic_compare_exchange_strong" - it
+ * always succeeds if the current value is expected, as per the pseudocode
+ * above; it will not spuriously fail as "atomic_compare_exchange_weak" may.
  */
 bool core_util_atomic_cas_ptr(void **ptr, void **expectedCurrentValue, void *desiredValue);
 
@@ -363,8 +383,11 @@ void *core_util_atomic_decr_ptr(void **valuePtr, ptrdiff_t delta);
 #ifdef __cplusplus
 } // extern "C"
 #endif
+/**@}*/
 
+/**@}*/
 
 #endif // __MBED_UTIL_CRITICAL_H__
 
-/** @}*/
+
+

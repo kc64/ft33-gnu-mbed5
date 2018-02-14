@@ -13,9 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <time.h>
 #include "platform/platform.h"
 #include "platform/FilePath.h"
 #include "hal/serial_api.h"
+#include "hal/us_ticker_api.h"
 #include "platform/mbed_toolchain.h"
 #include "platform/mbed_semihost_api.h"
 #include "platform/mbed_interface.h"
@@ -24,6 +26,9 @@
 #include "platform/mbed_error.h"
 #include "platform/mbed_stats.h"
 #include "platform/mbed_critical.h"
+#include "platform/PlatformMutex.h"
+#include "us_ticker_api.h"
+#include "lp_ticker_api.h"
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
@@ -33,8 +38,15 @@
 #include <errno.h>
 #include "platform/mbed_retarget.h"
 
+static SingletonPtr<PlatformMutex> _mutex;
+
 #if defined(__ARMCC_VERSION)
+#   if __ARMCC_VERSION >= 6010050
+#      include <arm_compat.h>
+#   endif
 #   include <rt_sys.h>
+#   include <rt_misc.h>
+#   include <stdint.h>
 #   define PREFIX(x)    _sys##x
 #   define OPEN_MAX     _SYS_OPEN
 #   ifdef __MICROLIB
@@ -51,7 +63,6 @@
 #   define STDERR_FILENO    2
 
 #else
-#   include <sys/stat.h>
 #   include <sys/syslimits.h>
 #   define PREFIX(x)    x
 #endif
@@ -242,7 +253,7 @@ extern "C" FILEHANDLE PREFIX(_open)(const char* name, int openmode) {
             /* The first part of the filename (between first 2 '/') is not a
              * registered mount point in the namespace.
              */
-            return handle_open_errors(-ENOENT, fh_i);
+            return handle_open_errors(-ENODEV, fh_i);
         }
 
         if (path.isFile()) {
@@ -250,7 +261,7 @@ extern "C" FILEHANDLE PREFIX(_open)(const char* name, int openmode) {
         } else {
             FileSystemHandle *fs = path.fileSystem();
             if (fs == NULL) {
-                return handle_open_errors(-ENOENT, fh_i);
+                return handle_open_errors(-ENODEV, fh_i);
             }
             int posix_mode = openmode_to_posix(openmode);
             int err = fs->open(&res, path.fileName(), posix_mode);
@@ -333,6 +344,18 @@ extern "C" int PREFIX(_write)(FILEHANDLE fh, const unsigned char *buffer, unsign
     return n;
 #endif
 }
+
+#if defined (__ARMCC_VERSION) && (__ARMCC_VERSION >= 6010050)
+extern "C" void PREFIX(_exit)(int return_code) {
+    while(1) {}
+}
+
+extern "C" void _ttywrch(int ch) {
+#if DEVICE_SERIAL
+    serial_putc(&stdio_uart, ch);
+#endif
+}
+#endif
 
 #if defined(__ICCARM__)
 extern "C" size_t    __read (int        fh, unsigned char *buffer, size_t       length) {
@@ -431,6 +454,7 @@ int _lseek(FILEHANDLE fh, int offset, int whence)
 #if defined(__ARMCC_VERSION)
     int whence = SEEK_SET;
 #endif
+
     if (fh < 3) {
         errno = ESPIPE;
         return -1;
@@ -497,17 +521,45 @@ extern "C" long PREFIX(_flen)(FILEHANDLE fh) {
     }
     return size;
 }
+
+extern "C" char Image$$RW_IRAM1$$ZI$$Limit[];
+
+extern "C" MBED_WEAK __value_in_regs struct __initial_stackheap _mbed_user_setup_stackheap(uint32_t R0, uint32_t R1, uint32_t R2, uint32_t R3)
+{
+    uint32_t zi_limit = (uint32_t)Image$$RW_IRAM1$$ZI$$Limit;
+    uint32_t sp_limit = __current_sp();
+
+    zi_limit = (zi_limit + 7) & ~0x7;    // ensure zi_limit is 8-byte aligned
+
+    struct __initial_stackheap r;
+    r.heap_base = zi_limit;
+    r.heap_limit = sp_limit;
+    return r;
+}
+
+extern "C" __value_in_regs struct __initial_stackheap __user_setup_stackheap(uint32_t R0, uint32_t R1, uint32_t R2, uint32_t R3) {
+    return _mbed_user_setup_stackheap(R0, R1, R2, R3);
+}
+
 #endif
 
 
 #if !defined(__ARMCC_VERSION) && !defined(__ICCARM__)
-extern "C" int _fstat(int fd, struct stat *st) {
-    if (fd < 3) {
+extern "C" int _fstat(int fh, struct stat *st) {
+    if (fh < 3) {
         st->st_mode = S_IFCHR;
         return  0;
     }
-    errno = EBADF;
-    return -1;
+
+    FileHandle* fhc = filehandles[fh-3];
+    if (fhc == NULL) {
+        errno = EBADF;
+        return -1;
+    }
+
+    st->st_mode = fhc->isatty() ? S_IFCHR : S_IFREG;
+    st->st_size = fhc->size();
+    return 0;
 }
 #endif
 
@@ -516,7 +568,7 @@ extern "C" int remove(const char *path) {
     FilePath fp(path);
     FileSystemHandle *fs = fp.fileSystem();
     if (fs == NULL) {
-        errno = ENOENT;
+        errno = ENODEV;
         return -1;
     }
 
@@ -536,7 +588,7 @@ extern "C" int rename(const char *oldname, const char *newname) {
     FileSystemHandle *fsNew = fpNew.fileSystem();
 
     if (fsOld == NULL) {
-        errno = ENOENT;
+        errno = ENODEV;
         return -1;
     }
 
@@ -576,7 +628,7 @@ extern "C" DIR *opendir(const char *path) {
     FilePath fp(path);
     FileSystemHandle* fs = fp.fileSystem();
     if (fs == NULL) {
-        errno = ENOENT;
+        errno = ENODEV;
         return NULL;
     }
 
@@ -628,7 +680,10 @@ extern "C" void seekdir(DIR *dir, off_t off) {
 extern "C" int mkdir(const char *path, mode_t mode) {
     FilePath fp(path);
     FileSystemHandle *fs = fp.fileSystem();
-    if (fs == NULL) return -1;
+    if (fs == NULL) {
+        errno = ENODEV;
+        return -1;
+    }
 
     int err = fs->mkdir(fp.fileName(), mode);
     if (err < 0) {
@@ -642,7 +697,10 @@ extern "C" int mkdir(const char *path, mode_t mode) {
 extern "C" int stat(const char *path, struct stat *st) {
     FilePath fp(path);
     FileSystemHandle *fs = fp.fileSystem();
-    if (fs == NULL) return -1;
+    if (fs == NULL) {
+        errno = ENODEV;
+        return -1;
+    }
 
     int err = fs->stat(fp.fileName(), st);
     if (err < 0) {
@@ -683,6 +741,7 @@ extern "C" int errno;
 
 // Dynamic memory allocation related syscall.
 #if defined(TARGET_NUVOTON)
+
 // Overwrite _sbrk() to support two region model (heap and stack are two distinct regions).
 // __wrap__sbrk() is implemented in:
 // TARGET_NUMAKER_PFM_NUC472    targets/TARGET_NUVOTON/TARGET_NUC472/TARGET_NUMAKER_PFM_NUC472/TOOLCHAIN_GCC_ARM/nuc472_retarget.c
@@ -843,7 +902,7 @@ std::FILE *mbed_fdopen(FileHandle *fh, const char *mode)
 }
 
 int mbed_getc(std::FILE *_file){
-#if defined (__ICCARM__)
+#if defined(__IAR_SYSTEMS_ICC__ ) && (__VER__ < 8000000)
     /*This is only valid for unbuffered streams*/
     int res = std::fgetc(_file);
     if (res>=0){
@@ -858,7 +917,7 @@ int mbed_getc(std::FILE *_file){
 }
 
 char* mbed_gets(char*s, int size, std::FILE *_file){
-#if defined (__ICCARM__)
+#if defined(__IAR_SYSTEMS_ICC__ ) && (__VER__ < 8000000)
     /*This is only valid for unbuffered streams*/
     char *str = fgets(s,size,_file);
     if (str!=NULL){
@@ -884,6 +943,13 @@ extern "C" WEAK void __iar_file_Mtxinit(__iar_Rmtx *mutex) {}
 extern "C" WEAK void __iar_file_Mtxdst(__iar_Rmtx *mutex) {}
 extern "C" WEAK void __iar_file_Mtxlock(__iar_Rmtx *mutex) {}
 extern "C" WEAK void __iar_file_Mtxunlock(__iar_Rmtx *mutex) {}
+#if defined(__IAR_SYSTEMS_ICC__ ) && (__VER__ >= 8000000)
+#pragma section="__iar_tls$$DATA"
+extern "C" WEAK void *__aeabi_read_tp (void) {
+  // Thread Local storage is not supported, using main thread memory for errno
+  return __section_begin("__iar_tls$$DATA");
+}
+#endif
 #elif defined(__CC_ARM)
 // Do nothing
 #elif defined (__GNUC__)
@@ -913,6 +979,10 @@ extern "C" void __env_unlock( struct _reent *_r )
 {
     __rtos_env_unlock(_r);
 }
+
+#endif
+
+#if defined (__GNUC__) || defined(__CC_ARM) || (defined (__ARMCC_VERSION) && (__ARMCC_VERSION >= 6010050))
 
 #define CXA_GUARD_INIT_DONE             (1 << 0)
 #define CXA_GUARD_INIT_IN_PROGRESS      (1 << 1)
@@ -970,15 +1040,60 @@ void *operator new[](std::size_t count)
     return buffer;
 }
 
+void *operator new(std::size_t count, const std::nothrow_t& tag)
+{
+    return malloc(count);
+}
+
+void *operator new[](std::size_t count, const std::nothrow_t& tag)
+{
+    return malloc(count);
+}
+
 void operator delete(void *ptr)
 {
-    if (ptr != NULL) {
-        free(ptr);
-    }
+    free(ptr);
 }
 void operator delete[](void *ptr)
 {
-    if (ptr != NULL) {
-        free(ptr);
-    }
+    free(ptr);
+}
+
+/* @brief   standard c library clock() function.
+ *
+ * This function returns the number of clock ticks elapsed since the start of the program.
+ *
+ * @note Synchronization level: Thread safe
+ *
+ * @return
+ *  the number of clock ticks elapsed since the start of the program.
+ *
+ * */
+extern "C" clock_t clock()
+{
+    _mutex->lock();
+    clock_t t = ticker_read(get_us_ticker_data());
+    t /= 1000000 / CLOCKS_PER_SEC; // convert to processor time
+    _mutex->unlock();
+    return t;
+}
+
+// temporary - Default to 1MHz at 32 bits if target does not have us_ticker_get_info
+MBED_WEAK const ticker_info_t* us_ticker_get_info()
+{
+    static const ticker_info_t info = {
+        1000000,
+        32
+    };
+    return &info;
+}
+
+// temporary - Default to 1MHz at 32 bits if target does not have lp_ticker_get_info
+MBED_WEAK const ticker_info_t* lp_ticker_get_info()
+{
+    static const ticker_info_t info = {
+        1000000,
+        32
+    };
+    return &info;
 }

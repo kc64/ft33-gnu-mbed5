@@ -24,6 +24,15 @@
 #include <cstdarg>
 #include "Callback.h"
 
+namespace mbed {
+
+/** \addtogroup platform */
+/** @{*/
+/**
+ * \defgroup platform_ATCmdParser ATCmdParser class
+ * @{
+ */
+
 /**
  * Parser class for parsing AT commands
  *
@@ -42,8 +51,6 @@
  * at.recv("OK");
  * @endcode
  */
-
-namespace mbed {
 
 class ATCmdParser : private NonCopyable<ATCmdParser>
 {
@@ -288,7 +295,22 @@ public:
      * recv operation.
      */
     void abort();
+    
+    /**
+    * Process out-of-band data
+    *
+    * Process out-of-band data in the receive buffer. This function
+    * returns immediately if there is no data to process.
+    *
+    * @return true if oob data processed, false otherwise
+    */
+    bool process_oob(void);
 };
+
+/**@}*/
+
+/**@}*/
+
 } //namespace mbed
 
 #endif //MBED_ATCMDPARSER_H
