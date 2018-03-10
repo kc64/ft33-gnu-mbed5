@@ -420,6 +420,18 @@ int main() {
     byte sd;
     byte sync_char;
 
+    // Initialize the unused RAM to track heap usage
+    for (uint32_t i = 0x10001200; i < 0x10002000; i++)
+    {
+        *(volatile uint8_t *)i = 0xCD;
+    }
+
+    // Initialize the unused USB RAM to track stack usage
+    for (uint32_t i = 0x20004000; i < 0x20004700; i++)
+    {
+        *(volatile uint8_t *)i = 0xCD;
+    }
+
     /* Basic initialization. */
     lights.write(0xFF); /* all off */
     

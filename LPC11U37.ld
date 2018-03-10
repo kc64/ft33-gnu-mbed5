@@ -3,7 +3,6 @@ MEMORY
 {
   FLASH (rx) : ORIGIN = 0x00000000, LENGTH = 128K
   RAM (rwx) : ORIGIN = 0x100000C0, LENGTH = 0x1F40
-  RAMIO (rwx) : ORIGIN = 0x20000000, LENGTH = 0x800
   USB_RAM (rwx): ORIGIN = 0x20004000, LENGTH = 0x800
 }
 
@@ -148,9 +147,8 @@ SECTIONS
 
     /* Set stack top to end of RAM, and stack limit move down by
      * size of stack_dummy section */
-/*    __StackTop = ORIGIN(RAMIO) + LENGTH(RAMIO); */
-    __StackTop = ORIGIN(RAM) + LENGTH(RAM);
-    __StackLimit = __StackTop - SIZEOF(.stack_dummy);
+    __StackTop = ORIGIN(USB_RAM) + LENGTH(USB_RAM);
+    __StackLimit = ORIGIN(USB_RAM);
     PROVIDE(__stack = __StackTop);
     
     /* Check if data + heap + stack exceeds RAM limit */
