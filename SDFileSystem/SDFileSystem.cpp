@@ -370,7 +370,7 @@ int SDFileSystem::_cmd8() {
         response[0] = _spi.write(0xFF);
         if (!(response[0] & 0x80)) {
             for (int j = 1; j < 5; j++) {
-                response[i] = _spi.write(0xFF);
+                response[j] = _spi.write(0xFF);
             }
             _cs = 1;
             _spi.write(0xFF);

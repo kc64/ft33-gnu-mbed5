@@ -88,16 +88,18 @@ FileHandle *FATFileSystem::open(const char* name, int flags) {
         }
     }
 
-    FIL fh;
-    FRESULT res = f_open(&fh, n, openmode);
+    FIL *fh;
+    FATFileHandle *fatFileHandleObj = new FATFileHandle();
+    fh = fatFileHandleObj->GetFIL();
+    FRESULT res = f_open(fh, n, openmode);
     if (res) {
         debug_if(FFS_DBG, "f_open('w') failed: %d\n", res);
         return NULL;
     }
     if (flags & O_APPEND) {
-        f_lseek(&fh, fh.fsize);
+        f_lseek(fh, fh->fsize);
     }
-    return new FATFileHandle(fh);
+    return fatFileHandleObj;
 }
 
 int FATFileSystem::open(FileHandle **file, const char *name, int flags) {

@@ -28,8 +28,12 @@ using namespace mbed;
 
 class FATFileHandle : public FileHandle {
 public:
-
+    FATFileHandle(){};
     FATFileHandle(FIL fh);
+    FIL *GetFIL()
+    {
+        return &_fh;
+    }
     virtual int close();
     virtual ssize_t write(const void* buffer, size_t length);
     virtual ssize_t read(void* buffer, size_t length);
