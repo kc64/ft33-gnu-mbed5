@@ -11,11 +11,6 @@
 #warning "Using debug mode."
 #endif
 
-// #define VERBOSE 0
-#ifdef VERBOSE
-#warning "Using verbose mode."
-#endif
-
 // #define USB_TEST
 #ifdef USB_TEST
 #warning "Using USB test mode."
@@ -42,9 +37,10 @@ exponetial curve that mimics the desired response. */
 #define B_COEFF 3.9
 #define C_COEFF -0.0207
 
-#define SLICE 65  // usec for 256 slices of a full AC cycle
-#define MAX_SLICE 240   // how many slices to allow in a full AC cycle
-#define HALF_CYCLE 8333     // usec for one half cycle of 60Hz power
+#define MAX_SLICE 245   // how many slices allow in a half AC cycle
+#define HALF_CYCLE (1000000 / 120)     // usec for one half cycle of 60Hz power
+#define SLICE (HALF_CYCLE / 256)       // usec for 105 slices of a half AC cycle
+// TODO: no need to slice the half cycle so finely.  Switch to 100 slices?
 
 /* The potentiometer input port to select the speed of the sequence steps. */
 AnalogIn potentiometer(P0_11);
@@ -83,10 +79,11 @@ word step;              /* The step in the current sequence. */
 byte num_ticks_per_step;  /* Each step can have one or more ticks before it changes. */
 char line[100];
 byte master_sequence; 
-int got_Z = 0;
-int got_R = 0;
+byte C = 0;
+byte R = 0;
+byte Z = 0;
+byte MASTER = 0;        // assume slave unless master is enabled
 char stmp[10];
-byte current_step, slave_channel;
 sDimStep *ptrDimSequence;
 sDimStep *ptrDimSeq = NULL;
 unsigned int DimSeqLen;
@@ -98,71 +95,63 @@ byte zc_slice = 0;
 byte Dimmer[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
 void ZCD_SD(void);
+void ZCD_SD_Slave(void);
 
 /* Scaled version of the the dimmer for fixed point calculations. */
 int Dimmer_sc[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
 void ZCD(void) {
-
+    // as the master running a chase sequence from internal flash, execute this every time the step timer expires
     clocks++;
     if(clocks > speed_clks) {
         clocks = 0;
         step++;
         if(step >= sequenceLength) {
             step = 0;
-            pc.putc('R');
+            R = 1;
         }
         else {
-            pc.putc('Z');
+            Z = 1;
         }
         pattern = ~ptrSequence[step];
-        #ifdef VERBOSE
-        //pc.printf("P:%02x ", ptrSequence[step]);
-        #endif
         lights = pattern;  
     }
-    
-    #ifdef VERBOSE
-    //pc.printf("Z. clocks: %d, speed_clks: %d\n\r", clocks, speed_clks);
-    #endif
 }
 
 void ZCD_Slave(void) {
-    if(got_R == 1) {
+    // as a slave running a chase sequence from internal flash, execute these sync instructions every time the step timer expires
+    // R = restart, Z = step to next
+    if (R) {
         step = 0;
     }
-    else if(got_Z == 1) {
+    else if (Z) {
         step++;
-        if(step >= sequenceLength) {
-            step = 0;
-        }
     }
     
-    if ((got_R == 1) or (got_Z == 1)) {
+    if ((R == 1) or (Z == 1)) {
         pattern = ~ptrSequence[step];
-        #ifdef VERBOSE
-        //pc.printf("P:%02x ", ptrSequence[step]);
-        #endif
         lights = pattern;
 
-        got_R = 0;
-        got_Z = 0;      
+        R = 0;
+        Z = 0;      
     }
-    
-    #ifdef VERBOSE
-    //pc.printf("Z. clocks: %d, speed_clks: %d\n\r", clocks, speed_clks);
-    #endif
 }
 
-/* This routine is called about 255 times every 1/60 of a second. It is our chance to turn on a 
-    channel based on the dimmer value. Dimmer is calculated at each good zero cross in ZCD_SD. */
 void tmr_Main(void) {
-
+    // while in dimmer mode, execute this routine every delta-T to evaluate whether to active a channel
     if (zc_slice > MAX_SLICE) {
         lights = 0xFF;              // C0-C7 all off
         zc_slice = 0;               // clear the slice counter for the next cycle
-        tkr_FastInt.detach();    // disable this timer interrupt
-        int_ZCD.fall(&ZCD_SD);      // enable the zero crossing interrupt since we're done dimming for this cycle
+        tkr_FastInt.detach();       // disable this timer interrupt
+        if (int_ZCD.read() == 1) {
+            if (MASTER) {
+                int_ZCD.fall(&ZCD_SD);      // enable the zero crossing interrupt since we're done dimming for this cycle
+            } 
+            else {
+                int_ZCD.fall(&ZCD_SD_Slave);
+            }
+            tkr_Timer.detach();
+        }
     }
     else {                          // we're still dimming so adjust every channel's slice counter
         zc_slice++;
@@ -210,34 +199,36 @@ void tmr_Main(void) {
     }
 }
 
-/* Switch all channels off. A zero crossing has just passed. Check the speed setting, find next ticks and steps. 
-   Calculate the new dimmer setting based on the start and stop values. */
-   
 void ZCD_SD(void) {
+    // as the master running a dimmer sequence loaded from the SD card, execute this every time a rising AC zero crossing occurs.
     int i;
     
-    int_ZCD.fall(NULL);                    // disable this ZCD interrupt
+    if (int_ZCD.read() == 0) {                     // the AC line just crossed to positive
+        int_ZCD.fall(NULL);                        // disable the ZCD interrupt
+        tkr_Timer.attach_us(&ZCD_SD, HALF_CYCLE);  // start the timer to terminate on approximately the negative-going AC zero crossing
+    }
+
+    clocks++;                                      // a clock is a zero cross (1/60 second)
     
-    /* A clock is a zero cross (1/60 second). */
-    clocks++;
-    /* We need speed_clks number of clocks before we tick. speed_clks is from the speed pot. */
-    if(clocks > speed_clks) {
+    if(clocks > speed_clks) {                      // we need speed_clks number of clocks before we tick
         clocks = 0;
         ticks++;
-        /* If we tick enough times for this step, goto the next step. */
-        if (ticks >= ptrDimSequence[step].ticks) {
+
+        if (ticks >= ptrDimSequence[step].ticks) { // once we tick enough times for this step, goto the next step
             step++;
             ticks = 0;
         }
-        /* If we step past the end of a sequence, restart the sequence. */
-        if(step >= sequenceLength) {
+
+        if(step >= sequenceLength) {               // once we step past the end of a sequence, restart the sequence
             step = 0;
+            R = 1;
         }
-        /* Put out the Z sync to the slaves. This tells them to step their sequence. */
-        pc.putc('Z');
+        else {
+            Z = 1;
+        }
 
         for(i=0; i<8; i++) {
-            Dimmer[i] = 255 - ptrDimSequence[step].Chan[i].start;   // this is a down counter so start high for low values
+            Dimmer[i] = 255 - ptrDimSequence[step].Chan[i].start;   // this is a down delay counter so start high for low luminous values
         }
     }
     else {
@@ -248,38 +239,48 @@ void ZCD_SD(void) {
         }   
     }    
     
-    /* Timer for the 255 step dimmer reoutine. */
+    /* Timer for the 255 step dimmer routine. */
     tkr_FastInt.attach_us(&tmr_Main, SLICE);
-
-    #ifdef VERBOSE
-    //pc.printf("Z. clocks: %d, speed_clks: %d\n\r", clocks, speed_clks);
-    #endif
-
 }
 
 void ZCD_SD_Slave(void) {
+    // as a slave running a dimmer sequence receieved from the master, execute these sync instructions every time a rising AC zero crossing occurs
+    int i;
     
-    clocks++;
-    if(got_Z == 1) {
-        got_Z = 0;
+    if (int_ZCD.read() == 0) {                     // the AC line just crossed to positive
+        int_ZCD.fall(NULL);                        // disable the ZCD interrupt
+        tkr_Timer.attach_us(&ZCD_SD_Slave, HALF_CYCLE);  // start the timer to terminate on approximately the negative-going AC zero crossing
+    }
+
+    clocks++;                                      // a clock is a zero cross (1/60 second)
+    
+    if (R) {
+        step = 0;
+        R = 0;
+    }
+    else if (Z) {
+        step++;
+        Z = 0;
+    }
+    
+    if(clocks > speed_clks) {                      // we need speed_clks number of clocks before we tick
         clocks = 0;
         ticks++;
-        if (ticks >= ptrDimSequence[step].ticks) {
-            step++;
-            ticks = 0;
+
+        for(i=0; i<8; i++) {
+            Dimmer[i] = 255 - ptrDimSequence[step].Chan[i].start;   // this is a down delay counter so start high for low luminous values
         }
-        if(step != current_step) {
-            step = current_step;
-        }
-        if(step >= sequenceLength) {
-            step = 0;
-        }
-        //pattern = ~ptrDimSequence[step].Chan[slave_channel];
-        #ifdef VERBOSE
-        //pc.printf("P:%02x %02x %02x, %02x", ptrDimSequence[step].Chan[0], step, ticks, current_step);
-        #endif
-        lights = pattern;
-    } 
+    }
+    else {
+        /* If we don't need to tick or step, then find the new dimmer values for the next 1/60 second clock. This calcuation is a simple linear interperloation
+            between the start and stop. At each 1/60 second interval we recalc the dimmer value along the line. */
+        for(i=0; i<8; i++) {
+            Dimmer[i] = 255 - (ptrDimSequence[step].Chan[i].start + (((clocks << 8)/speed_clks * (ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start)) >> 8));
+        }   
+    }    
+    
+    /* Timer for the 255 step dimmer routine. */
+    tkr_FastInt.attach_us(&tmr_Main, SLICE);
 }
 
 void vfnLoadSequencesFromSD(byte sequence) {
@@ -296,7 +297,6 @@ void vfnLoadSequencesFromSD(byte sequence) {
     
     fp = fopen("/sd/seq.txt", "r");
     if(fp == NULL) {
-        pc.printf("No file. Restarting...\n");
         // if the SD card is present but not responding, reset and try again
         NVIC_SystemReset();
     }
@@ -309,7 +309,6 @@ void vfnLoadSequencesFromSD(byte sequence) {
                 if(sequence_num == sequence) {
                     ptr = (sDimStep *) malloc(sizeof(sDimStep) * steps);
                     if (ptr == NULL) {
-                        pc.printf("Out of memory while loading sequence %d from SD card\n", sequence_num);
                         break;
                     }
                     ptrDimSeq = ptr;
@@ -374,7 +373,6 @@ void vfnSlaveReceiveData(byte sequence) {
             if(sequence_num == sequence) {
                 ptr = (sDimStep *) malloc(sizeof(sDimStep) * steps);
                 if (ptr == NULL) {
-                    pc.printf("Out of memory while loading sequence %d from SD card\n", sequence_num);
                     break;
                 }
                 ptrDimSeq = ptr;
@@ -411,24 +409,21 @@ void vfnSlaveReceiveData(byte sequence) {
             }
         }              
     }
-}   
-
+}
 
 int main() {
 
     byte sequence;
     byte sd;
-    byte sync_char;
+    byte command_char;
 
     // Initialize the unused RAM to track heap usage
-    for (uint32_t i = 0x10001200; i < 0x10002000; i++)
-    {
+    for (uint32_t i = 0x10001200; i < 0x10002000; i++) {
         *(volatile uint8_t *)i = 0xCD;
     }
 
     // Initialize the unused USB RAM to track stack usage
-    for (uint32_t i = 0x20004000; i < 0x20004700; i++)
-    {
+    for (uint32_t i = 0x20004000; i < 0x20004700; i++) {
         *(volatile uint8_t *)i = 0xCD;
     }
 
@@ -462,21 +457,22 @@ int main() {
     sd_present.input();
     sd = !sd_present.read();
     
+    MASTER = master_slave.read();
+    
     wait(1.0);
 
-    /* Check master/slave and if a slave should use it's own sequence selection or get 
-        it from a master. */
-    if(master_slave.read() == 1) {
-        if (sd) {
-            vfnLoadSequencesFromSD(sequence);
-        }
-
+    if (MASTER) {
         if(sequence < 240) {
             ptrSequence = (byte *) ptrSequences[sequence];
             sequenceLength = sequenceLengths[sequence];
             tkr_Timer.attach_us(&ZCD, HALF_CYCLE);
         }
         else {
+            if (sd) {
+                vfnLoadSequencesFromSD(sequence);
+            }
+            
+            // why do these need to be duplicated???
             ptrDimSequence = ptrDimSeq;
             sequenceLength = DimSeqLen;
             
@@ -486,36 +482,35 @@ int main() {
 
         clocks = SLOWEST_TIME;
         while(1) {
-            /* Read the potentiometer. */
-            
-            speed = A_COEFF * exp(B_COEFF*(1.0-potentiometer)) + C_COEFF;
-    
-            __disable_irq();    // Disable Interrupts
-            /* Changes the analog speed voltage to a time in clocks. */
-            speed_clks = SLOPE * speed + FASTEST_TIME;
-            __enable_irq();     // Enable Interrupts 
-    
-            //pc.printf("C %i\n", speed_clks);
-            wait(0.5);
+            if (R) {
+                pc.putc('R');
+                R = 0;
+            }
+            else if(Z) {
+                pc.putc('Z');
+                Z = 0;
+
+                // since a new step has just begun, send the new speed value also
+                speed = A_COEFF * exp(B_COEFF * (1.0 - potentiometer)) + C_COEFF;       // read the potentiometer
+                __disable_irq();    // Disable Interrupts
+                speed_clks = SLOPE * speed + FASTEST_TIME;      // convert the analog speed voltage to a time in clocks
+                __enable_irq();     // Enable Interrupts 
+
+                pc.printf("C %i\n", speed_clks);                // send the new speed to the slaves so they can dim at the correct rate
+            }
         }
     }
     else {
-        /* This is a slave board. */
-        #ifdef FT_DEBUG
-        pc.printf("Slave\n");
-        #endif
-
+        // this is a slave
         if(sequence < 240) {
             ptrSequence = (byte *) ptrSequences[sequence];
             sequenceLength = sequenceLengths[sequence];
-            
             tkr_Timer.attach_us(&ZCD_Slave, HALF_CYCLE);
         }
         else {
             vfnSlaveReceiveData(sequence);
             ptrDimSequence = ptrDimSeq;
             sequenceLength = DimSeqLen;
-                                  
             tkr_Timer.attach_us(&ZCD_SD_Slave, HALF_CYCLE);
         }
 
@@ -523,12 +518,15 @@ int main() {
 
         while(1) {
             // __disable_irq();
-            sync_char = pc.getc();
-            if (sync_char == 'R') {
-                got_R = 1;
+            command_char = pc.getc();
+            if (command_char == 'R') {
+                R = 1;
             }
-            else if (sync_char == 'Z') {
-                got_Z = 1;
+            else if (command_char == 'Z') {
+                Z = 1;
+            }
+            else if (command_char == 'C') {
+                sscanf(line, "%d", &speed_clks);
             }
             // __enable_irq();
         }
