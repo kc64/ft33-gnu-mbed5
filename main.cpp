@@ -37,10 +37,10 @@ exponetial curve that mimics the desired response. */
 #define B_COEFF 3.9
 #define C_COEFF -0.0207
 
-#define MAX_SLICE 245   // how many slices allow in a half AC cycle
-#define HALF_CYCLE (1000000 / 120)     // usec for one half cycle of 60Hz power
-#define SLICE (HALF_CYCLE / 256)       // usec for 105 slices of a half AC cycle
-// TODO: no need to slice the half cycle so finely.  Switch to 100 slices?
+#define MAX_SLICE 250   // how many slices to allow in a half AC cycle
+#define HALF_CYCLE 8333     // usec for one half cycle of 60Hz power
+#define SLICE 65       // usec for slices of a half AC cycle
+#define DURATION_OF_ISR 300            // how long it takes the ZCD_SD ISR to execute
 
 /* The potentiometer input port to select the speed of the sequence steps. */
 AnalogIn potentiometer(P0_11);
@@ -61,6 +61,22 @@ BusOut lights(P0_23, P0_19, P0_22, P0_18, P0_21, P0_17, P0_20, P0_16);
 BusInOut dipswitch(P1_23, P0_12, P0_13, P0_14, P0_7, P0_8, P0_9, P1_24);
 DigitalInOut master_slave(P0_4);
 DigitalInOut local_slave_data(P0_5);
+
+/*
+The 4-position DIP switch is like this:
+
+Switch 1 = Slave Enable
+    Off for Master
+    On for Slave
+
+Switch 2 = Use local memory
+    Off for getting pattern from Master
+    On for getting pattern from local memory
+
+Switch 3 = Use sync wires
+    Off for getting signals from radio module
+    On for getting signals from sync wires
+*/
 
 /* Setup the reset switch as an input to keep it from being a reset */
 DigitalInOut reset(P0_0);
@@ -93,6 +109,7 @@ byte zc_slice = 0;
 
 /* The dimmer timers for each channel. */
 byte Dimmer[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+byte Dimmer_save[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
 void ZCD_SD(void);
 void ZCD_SD_Slave(void);
@@ -138,24 +155,28 @@ void ZCD_Slave(void) {
 }
 
 void tmr_Main(void) {
-    // while in dimmer mode, execute this routine every delta-T to evaluate whether to active a channel
-    if (zc_slice > MAX_SLICE) {
-        lights = 0xFF;              // C0-C7 all off
-        zc_slice = 0;               // clear the slice counter for the next cycle
+    // while in dimmer mode, execute this routine every delta-T slice to evaluate whether to active a channel
+    int i;
+
+    if (zc_slice > 245) {
+        lights = 0xFF;              // C0-C7 all off (but they'll stay on until the ZC occurs)
+        zc_slice = 0;               // clear the slice counter for the next half cycle
         tkr_FastInt.detach();       // disable this timer interrupt
-        if (int_ZCD.read() == 1) {
+        
+        if (int_ZCD.read() == 1) {  // if the slice counter has expired and we're on a negative half cycle (ZCD signal=1), re-enable the external interrupt to catch the negative edge
             if (MASTER) {
-                int_ZCD.fall(&ZCD_SD);      // enable the zero crossing interrupt since we're done dimming for this cycle
+                int_ZCD.fall(&ZCD_SD);      // enable the zero crossing interrupt since we're done dimming for this half cycle
             } 
             else {
                 int_ZCD.fall(&ZCD_SD_Slave);
             }
-            tkr_Timer.detach();
         }
+        return;
     }
-    else {                          // we're still dimming so adjust every channel's slice counter
-        zc_slice++;
-        
+    
+    zc_slice++;
+    
+    if ((zc_slice < 120) || ((zc_slice > 120) && (zc_slice < 245))) {     // we're still dimming so adjust every channel's slice counter
         if (Dimmer[0] != 0) {
             Dimmer[0]--;
         } else {
@@ -196,6 +217,16 @@ void tmr_Main(void) {
         } else {
             C7 = 0;
         }
+        return;
+    }
+    
+    lights = 0xFF;              // C0-C7 all off (but they'll stay on until the ZC occurs)
+    
+    if (zc_slice == 120) {
+        for(i=0; i<8; i++) {
+            Dimmer[i] = Dimmer_save[i];
+        }
+        return;
     }
 }
 
@@ -204,8 +235,7 @@ void ZCD_SD(void) {
     int i;
     
     if (int_ZCD.read() == 0) {                     // the AC line just crossed to positive
-        int_ZCD.fall(NULL);                        // disable the ZCD interrupt
-        tkr_Timer.attach_us(&ZCD_SD, HALF_CYCLE);  // start the timer to terminate on approximately the negative-going AC zero crossing
+        int_ZCD.fall(NULL);                        // disable the ZCD interrupt otherwise it will trigger on the negative edge also due to some bug. noise?
     }
 
     clocks++;                                      // a clock is a zero cross (1/60 second)
@@ -229,6 +259,7 @@ void ZCD_SD(void) {
 
         for(i=0; i<8; i++) {
             Dimmer[i] = 255 - ptrDimSequence[step].Chan[i].start;   // this is a down delay counter so start high for low luminous values
+            Dimmer_save[i] = Dimmer[i];
         }
     }
     else {
@@ -236,10 +267,12 @@ void ZCD_SD(void) {
             between the start and stop. At each 1/60 second interval we recalc the dimmer value along the line. */
         for(i=0; i<8; i++) {
             Dimmer[i] = 255 - (ptrDimSequence[step].Chan[i].start + (((clocks << 8)/speed_clks * (ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start)) >> 8));
+            Dimmer_save[i] = Dimmer[i];
         }   
     }    
     
     /* Timer for the 255 step dimmer routine. */
+    zc_slice = 0;
     tkr_FastInt.attach_us(&tmr_Main, SLICE);
 }
 
@@ -428,7 +461,7 @@ int main() {
     }
 
     /* Basic initialization. */
-    lights.write(0xFF); /* all off */
+    lights = 0xFF; /* all off */
     
     clocks = 0;
     speed_clks = FASTEST_TIME;
