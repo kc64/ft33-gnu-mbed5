@@ -92,7 +92,6 @@ byte *ptrSequence;      /* A pointer to the desired sequence. */
 
 word sequenceLength;    /* The length of the desired sequence. */
 word step;              /* The step in the current sequence. */
-byte num_ticks_per_step;  /* Each step can have one or more ticks before it changes. */
 char line[100];
 byte master_sequence; 
 byte C = 0;
@@ -158,7 +157,7 @@ void tmr_Main(void) {
     // while in dimmer mode, execute this routine every delta-T slice to evaluate whether to active a channel
     int i;
 
-    if (zc_slice > 245) {
+    if (zc_slice > 240) {
         lights = 0xFF;              // C0-C7 all off (but they'll stay on until the ZC occurs)
         zc_slice = 0;               // clear the slice counter for the next half cycle
         tkr_FastInt.detach();       // disable this timer interrupt
@@ -176,7 +175,7 @@ void tmr_Main(void) {
     
     zc_slice++;
     
-    if ((zc_slice < 120) || ((zc_slice > 120) && (zc_slice < 245))) {     // we're still dimming so adjust every channel's slice counter
+    if ((zc_slice < 116) || (zc_slice > 122)) {     // we're still dimming so adjust every channel's slice counter
         if (Dimmer[0] != 0) {
             Dimmer[0]--;
         } else {
@@ -257,7 +256,7 @@ void ZCD_SD(void) {
             Z = 1;
         }
 
-        for(i=0; i<8; i++) {
+        for(i=0; i<8; i++) {        // reset the dimming level to the start value
             Dimmer[i] = 255 - ptrDimSequence[step].Chan[i].start;   // this is a down delay counter so start high for low luminous values
             Dimmer_save[i] = Dimmer[i];
         }
