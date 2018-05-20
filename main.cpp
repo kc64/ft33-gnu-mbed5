@@ -223,7 +223,6 @@ void slice_timer_isr(void) {
 
 void master_zcross_isr(void) {
     // as the master running a dimmer sequence loaded from the SD card, execute this every time a rising AC zero crossing occurs.
-    int i;
     
     if (int_ZCD.read() == 0) {                     // the AC line just crossed to positive
         int_ZCD.fall(NULL);                        // disable the ZCD interrupt otherwise it will trigger on the negative edge also due to some bug. noise?
@@ -247,11 +246,6 @@ void master_zcross_isr(void) {
                 Z = 1;
             }
         }
-        
-        for(i=0; i<8; i++) {
-            Dimmer[i] = 255 - (ptrDimSequence[step].Chan[i].start + (((ticks << 8) * (ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start)) >> 8));
-            Dimmer_save[i] = Dimmer[i];
-        }   
     }
     
     /* Timer for the 255 step dimmer routine. */
@@ -534,7 +528,15 @@ int main() {
 
             /******************************************************** MASTER DIMMER LOOP ********************************************************/
             while(1) {
+                __disable_irq();
                 dimmer_speed = 256 - (potentiometer.read_u16() / 258 + 1);
+                
+                for(i=0; i<8; i++) {
+                    Dimmer[i] = 255 - (ptrDimSequence[step].Chan[i].start + (((ticks << 8) * (ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start)) >> 8));
+                    Dimmer_save[i] = Dimmer[i];
+                }   
+                __enable_irq();
+                
                 if (R) {
                     pc.putc('R');
                     R = 0;
