@@ -72,6 +72,7 @@ float speed;            /* The selected speed for chases. */
 word dimmer_speed = 1;      /* The selected speed for dimming */
 int speed_clks;         /* speed in clocks (1/60th sec). */
 int clocks = 1;             /* Incremented everytime the zero cross interrupt is called. */
+int total_clocks_per_step = 1;
 byte pattern;           /* The current output pattern. */
 byte *ptrSequence;      /* A pointer to the desired sequence. */
 
@@ -154,13 +155,11 @@ void slice_timer_isr(void) {
         zc_slice = 0;                                  // clear the slice counter for the next half cycle
         tkr_FastInt.detach();                          // disable this timer interrupt
         
-        if (int_ZCD.read() == 1) {  // if the slice counter has expired and we're on a negative half cycle (ZCD signal=1), re-enable the external interrupt to catch the negative edge
-            if (MASTER) {
-                int_ZCD.fall(&master_zcross_isr);      // enable the zero crossing interrupt since we're done dimming for this half cycle
-            } 
-            else {
-                int_ZCD.fall(&slave_zcross_isr);
-            }
+        if (MASTER) {
+            int_ZCD.fall(&master_zcross_isr);      // enable the zero crossing interrupt since we're done dimming for this half cycle
+        } 
+        else {
+            int_ZCD.fall(&slave_zcross_isr);
         }
         return;
     }
@@ -223,6 +222,7 @@ void slice_timer_isr(void) {
 
 void master_zcross_isr(void) {
     // as the master running a dimmer sequence loaded from the SD card, execute this every time a rising AC zero crossing occurs.
+    int i;
     
     if (int_ZCD.read() == 0) {                     // the AC line just crossed to positive
         int_ZCD.fall(NULL);                        // disable the ZCD interrupt otherwise it will trigger on the negative edge also due to some bug. noise?
@@ -231,22 +231,23 @@ void master_zcross_isr(void) {
     clocks--;                                      // a clock is a zero cross (1/60 second)
     
     if(clocks == 0) {                              // we need count until clocks rolls over to zero
-        clocks = dimmer_speed;
-        ticks++;
-
-        if (ticks >= ptrDimSequence[step].ticks) { // once we tick enough times for this step, goto the next step
-            ticks = 0;
-            step++;
+        step++;
             
-            if(step >= sequenceLength) {               // once we step past the end of a sequence, restart the sequence
-                step = 0;
-                R = 1;
-            }
-            else {
-                Z = 1;
-            }
+        if(step >= sequenceLength) {               // once we step past the end of a sequence, restart the sequence
+            step = 0;
+            R = 1;
         }
+        else {
+            Z = 1;
+        }    
+        total_clocks_per_step = dimmer_speed * ptrDimSequence[step].ticks;
+        clocks = total_clocks_per_step;
     }
+        
+    for(i=0; i<8; i++) {
+        Dimmer[i] = 255 - (ptrDimSequence[step].Chan[i].start + ((ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start) * clocks) / total_clocks_per_step);
+        Dimmer_save[i] = Dimmer[i];
+    }   
     
     /* Timer for the 255 step dimmer routine. */
     zc_slice = 0;
@@ -426,7 +427,6 @@ int main() {
     byte sequence;
     byte sd;
     byte command_char;
-    byte i;
 
     // Initialize the unused RAM to track heap usage
     for (uint32_t i = 0x10001200; i < 0x10002000; i++) {
@@ -528,15 +528,7 @@ int main() {
 
             /******************************************************** MASTER DIMMER LOOP ********************************************************/
             while(1) {
-                __disable_irq();
-                dimmer_speed = 256 - (potentiometer.read_u16() / 258 + 1);
-                
-                for(i=0; i<8; i++) {
-                    Dimmer[i] = 255 - (ptrDimSequence[step].Chan[i].start + (((ticks << 8) * (ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start)) >> 8));
-                    Dimmer_save[i] = Dimmer[i];
-                }   
-                __enable_irq();
-                
+                dimmer_speed = FASTEST_TIME + (SLOPE * (A_COEFF * exp(B_COEFF * (1.0 - potentiometer)) + C_COEFF));
                 if (R) {
                     pc.putc('R');
                     R = 0;
