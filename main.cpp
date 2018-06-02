@@ -20,6 +20,9 @@
 /* Serial debug port. */
 Serial pc(P1_13, P1_14); // tx, rx
 
+DigitalOut Test_RXD(P1_26);
+DigitalOut Test_TXD(P1_27);
+
 InterruptIn int_ZCD(P0_2);
 Ticker tkr_Timer;
 Ticker tkr_FastInt;
@@ -166,57 +169,45 @@ void slice_timer_isr(void) {
     
     zc_slice++;
     
-    if ((zc_slice < 116) || (zc_slice > 122)) {     // while in the working parts of the AC cycle, process the dimmer counters and active the triacs when setpoint is reached but stay away from the zc
-        if (Dimmer[0] != 0) {
-            Dimmer[0]--;
-        } else {
-            C0 = 0;
-        }
-        if (Dimmer[1] != 0) {
-            Dimmer[1]--;
-        } else {
-            C1 = 0;
-        }
-        if (Dimmer[2] != 0) {
-            Dimmer[2]--;
-        } else {
-            C2 = 0;
-        }
-        if (Dimmer[3] != 0) {
-            Dimmer[3]--;
-        } else {
-            C3 = 0;
-        }
-        if (Dimmer[4] != 0) {
-            Dimmer[4]--;
-        } else {
-            C4 = 0;
-        }
-        if (Dimmer[5] != 0) {
-            Dimmer[5]--;
-        } else {
-            C5 = 0;
-        }
-        if (Dimmer[6] != 0) {
-            Dimmer[6]--;
-        } else {
-            C6 = 0;
-        }
-        if (Dimmer[7] != 0) {
-            Dimmer[7]--;
-        } else {
-            C7 = 0;
-        }
-        return;
+    if (Dimmer[0] != 0) {
+        Dimmer[0]--;
+    } else {
+        C0 = 0;
     }
-    
-    lights = 0xFF;              // falling through the section above means that we shut off all triggers to let the triacs switch off during the zc
-    
-    if (zc_slice == 120) {      // if in the zc keepout zone, restore all of the dimmer counters for the second half cycle
-        for(i=0; i<8; i++) {
-            Dimmer[i] = Dimmer_save[i];
-        }
-        return;
+    if (Dimmer[1] != 0) {
+        Dimmer[1]--;
+    } else {
+        C1 = 0;
+    }
+    if (Dimmer[2] != 0) {
+        Dimmer[2]--;
+    } else {
+        C2 = 0;
+    }
+    if (Dimmer[3] != 0) {
+        Dimmer[3]--;
+    } else {
+        C3 = 0;
+    }
+    if (Dimmer[4] != 0) {
+        Dimmer[4]--;
+    } else {
+        C4 = 0;
+    }
+    if (Dimmer[5] != 0) {
+        Dimmer[5]--;
+    } else {
+        C5 = 0;
+    }
+    if (Dimmer[6] != 0) {
+        Dimmer[6]--;
+    } else {
+        C6 = 0;
+    }
+    if (Dimmer[7] != 0) {
+        Dimmer[7]--;
+    } else {
+        C7 = 0;
     }
 }
 
@@ -240,6 +231,7 @@ void master_zcross_isr(void) {
         else {
             Z = 1;
         }    
+
         total_clocks_per_step = dimmer_speed * ptrDimSequence[step].ticks;
         clocks = total_clocks_per_step;
     }
@@ -427,6 +419,7 @@ int main() {
     byte sequence;
     byte sd;
     byte command_char;
+    byte i;
 
     // Initialize the unused RAM to track heap usage
     for (uint32_t i = 0x10001200; i < 0x10002000; i++) {
@@ -528,7 +521,9 @@ int main() {
 
             /******************************************************** MASTER DIMMER LOOP ********************************************************/
             while(1) {
+                Test_RXD = 1;
                 dimmer_speed = FASTEST_TIME + (SLOPE * (A_COEFF * exp(B_COEFF * (1.0 - potentiometer)) + C_COEFF));
+                Test_RXD = 0;
                 if (R) {
                     pc.putc('R');
                     R = 0;
