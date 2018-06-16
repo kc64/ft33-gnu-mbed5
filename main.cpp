@@ -88,6 +88,8 @@ byte R = 0;
 byte Z = 0;
 byte MASTER = 0;        // assume slave unless master is enabled
 
+float old_pot, new_pot;
+
 sDimStep *ptrDimSequence;
 sDimStep *ptrDimSeq = NULL;
 unsigned int DimSeqLen;
@@ -97,7 +99,6 @@ byte zc_slice = 0;
 
 /* The dimmer timers for each channel. */
 byte Dimmer[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-byte Dimmer_save[8] = {0, 0, 0, 0, 0, 0, 0, 0};
 
 void master_timer_isr (void);
 void slave_timer_isr(void);
@@ -151,8 +152,6 @@ void slave_timer_isr(void) {
 void slice_timer_isr(void) {
     // while in dimmer mode, execute this routine every delta-T slice to evaluate whether to active a channel
 
-    int i;
-
     if (zc_slice > 240) {                              // if nearing the end of a full AC cycle, reset everything for the next cycle
         lights = 0xFF;                                 // C0-C7 all off (but they'll stay on until the ZC occurs)
         zc_slice = 0;                                  // clear the slice counter for the next half cycle
@@ -169,46 +168,14 @@ void slice_timer_isr(void) {
     
     zc_slice++;
     
-    if (Dimmer[0] != 0) {
-        Dimmer[0]--;
-    } else {
-        C0 = 0;
-    }
-    if (Dimmer[1] != 0) {
-        Dimmer[1]--;
-    } else {
-        C1 = 0;
-    }
-    if (Dimmer[2] != 0) {
-        Dimmer[2]--;
-    } else {
-        C2 = 0;
-    }
-    if (Dimmer[3] != 0) {
-        Dimmer[3]--;
-    } else {
-        C3 = 0;
-    }
-    if (Dimmer[4] != 0) {
-        Dimmer[4]--;
-    } else {
-        C4 = 0;
-    }
-    if (Dimmer[5] != 0) {
-        Dimmer[5]--;
-    } else {
-        C5 = 0;
-    }
-    if (Dimmer[6] != 0) {
-        Dimmer[6]--;
-    } else {
-        C6 = 0;
-    }
-    if (Dimmer[7] != 0) {
-        Dimmer[7]--;
-    } else {
-        C7 = 0;
-    }
+    if (Dimmer[0] != 0) Dimmer[0]--; else C0 = 0;
+    if (Dimmer[1] != 0) Dimmer[1]--; else C1 = 0;
+    if (Dimmer[2] != 0) Dimmer[2]--; else C2 = 0;
+    if (Dimmer[3] != 0) Dimmer[3]--; else C3 = 0;
+    if (Dimmer[4] != 0) Dimmer[4]--; else C4 = 0;
+    if (Dimmer[5] != 0) Dimmer[5]--; else C5 = 0;
+    if (Dimmer[6] != 0) Dimmer[6]--; else C6 = 0;
+    if (Dimmer[7] != 0) Dimmer[7]--; else C7 = 0;    
 }
 
 void master_zcross_isr(void) {
@@ -238,7 +205,6 @@ void master_zcross_isr(void) {
         
     for(i=0; i<8; i++) {
         Dimmer[i] = 255 - (ptrDimSequence[step].Chan[i].start + ((ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start) * clocks) / total_clocks_per_step);
-        Dimmer_save[i] = Dimmer[i];
     }   
     
     /* Timer for the 255 step dimmer routine. */
@@ -251,38 +217,32 @@ void slave_zcross_isr(void) {
     int i;
     
     if (int_ZCD.read() == 0) {                     // the AC line just crossed to positive
-        int_ZCD.fall(NULL);                        // disable the ZCD interrupt
-        tkr_Timer.attach_us(&slave_zcross_isr, HALF_CYCLE);  // start the timer to terminate on approximately the negative-going AC zero crossing
+        int_ZCD.fall(NULL);                        // disable the ZCD interrupt otherwise it will trigger on the negative edge also due to some bug. noise?
     }
 
-    clocks++;                                      // a clock is a zero cross (1/60 second)
-    
     if (R) {
         step = 0;
-        R = 0;
     }
     else if (Z) {
         step++;
+    }
+    
+    if (R or Z) {
+        total_clocks_per_step = dimmer_speed * ptrDimSequence[step].ticks;
+        clocks = total_clocks_per_step;
+        R = 0;
         Z = 0;
     }
     
-    if(clocks > speed_clks) {                      // we need speed_clks number of clocks before we tick
-        clocks = 0;
-        ticks++;
-
-        for(i=0; i<8; i++) {
-            Dimmer[i] = 255 - ptrDimSequence[step].Chan[i].start;   // this is a down delay counter so start high for low luminous values
-        }
-    }
-    else {
-        /* If we don't need to tick or step, then find the new dimmer values for the next 1/60 second clock. This calcuation is a simple linear interperloation
-            between the start and stop. At each 1/60 second interval we recalc the dimmer value along the line. */
-        for(i=0; i<8; i++) {
-            Dimmer[i] = 255 - (ptrDimSequence[step].Chan[i].start + (((clocks << 8)/speed_clks * (ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start)) >> 8));
-        }   
-    }    
+    if (clocks > 0) {
+        clocks--;
     
+        for(i=0; i<8; i++) {
+            Dimmer[i] = 255 - (ptrDimSequence[step].Chan[i].start + ((ptrDimSequence[step].Chan[i].stop - ptrDimSequence[step].Chan[i].start) * clocks) / total_clocks_per_step);
+        }   
+    }
     /* Timer for the 255 step dimmer routine. */
+    zc_slice = 0;
     tkr_FastInt.attach_us(&slice_timer_isr, SLICE);
 }
 
@@ -419,7 +379,6 @@ int main() {
     byte sequence;
     byte sd;
     byte command_char;
-    byte i;
 
     // Initialize the unused RAM to track heap usage
     for (uint32_t i = 0x10001200; i < 0x10002000; i++) {
@@ -494,13 +453,10 @@ int main() {
                     pc.putc('Z');
                     Z = 0;
 
-                    // since a new step has just begun, send the new speed value also
                     speed = A_COEFF * exp(B_COEFF * (1.0 - potentiometer)) + C_COEFF;       // read the potentiometer
                     __disable_irq();    // Disable Interrupts
                     speed_clks = SLOPE * speed + FASTEST_TIME;      // convert the analog speed voltage to a time in clocks
                     __enable_irq();     // Enable Interrupts 
-
-                    pc.printf("C %i\n", speed_clks);                // send the new speed to the slaves so they can dim at the correct rate
                 }
             }
             /****************************************************** END MASTER CHASE LOOP ******************************************************/
@@ -510,28 +466,36 @@ int main() {
                 vfnLoadSequencesFromSD(sequence);
             }
             
-            // why do these need to be duplicated???
             ptrDimSequence = ptrDimSeq;
             sequenceLength = DimSeqLen;
             
-            /* This sets an interupt when a zero cross is detected. */
+            clocks = dimmer_speed;
+            new_pot = potentiometer;
+            old_pot = new_pot;
+
             int_ZCD.fall(&master_zcross_isr);
             
-            clocks = dimmer_speed;
-
             /******************************************************** MASTER DIMMER LOOP ********************************************************/
             while(1) {
-                Test_RXD = 1;
-                dimmer_speed = FASTEST_TIME + (SLOPE * (A_COEFF * exp(B_COEFF * (1.0 - potentiometer)) + C_COEFF));
-                Test_RXD = 0;
+//                Test_RXD = 1;
+                new_pot = potentiometer;
+                if (fabs(old_pot - new_pot) > 0.1) {
+                    old_pot = new_pot;
+                    total_clocks_per_step = dimmer_speed * ptrDimSequence[step].ticks;
+                    clocks = total_clocks_per_step;
+                }
+                dimmer_speed = FASTEST_TIME + (SLOPE * (A_COEFF * exp(B_COEFF * (1.0 - new_pot)) + C_COEFF));
+//                Test_RXD = 0;
                 if (R) {
-                    pc.putc('R');
-                    R = 0;
+                    pc.printf("R\n");
                 }
                 else if(Z) {
-                    pc.putc('Z');
-                    Z = 0;
+                    pc.printf("Z\n");
+                }
+                if (R or Z) {
                     pc.printf("C %i\n", dimmer_speed);                // send the new speed to the slaves so they can dim at the correct rate
+                    R = 0;
+                    Z = 0;
                 }
             }
             /****************************************************** END MASTER DIMMER LOOP ******************************************************/
@@ -543,29 +507,46 @@ int main() {
             ptrSequence = (byte *) ptrSequences[sequence];
             sequenceLength = sequenceLengths[sequence];
             tkr_Timer.attach_us(&slave_timer_isr, HALF_CYCLE);
+
+            clocks = SLOWEST_TIME;
+
+            /******************************************************** SLAVE CHASE LOOP ********************************************************/
+            while(1) {
+                command_char = pc.getc();
+                if (command_char == 'R') {
+                    R = 1;
+                }
+                else if (command_char == 'Z') {
+                    Z = 1;
+                }
+            }
+            /***************************************************** END SLAVE CHASE LOOP ********************************************************/
         }
         else {
             vfnSlaveReceiveData(sequence);
+            
             ptrDimSequence = ptrDimSeq;
             sequenceLength = DimSeqLen;
-            tkr_Timer.attach_us(&slave_zcross_isr, HALF_CYCLE);
-        }
+            
+            clocks = dimmer_speed;
 
-        clocks = SLOWEST_TIME;
-
-        while(1) {
-            // __disable_irq();
-            command_char = pc.getc();
-            if (command_char == 'R') {
-                R = 1;
+            int_ZCD.fall(&slave_zcross_isr);
+            
+            /********************************************************* SLAVE DIMMER LOOP ********************************************************/
+            while(1) {
+                vfnGetLine();
+                
+                if(line[0] == 'R') {
+                    R = 1;
+                }
+                else if (line[0] == 'Z') {
+                    Z = 1;
+                }
+                else if (line[0] == 'C') {
+                    sscanf(line, "%*s %i", &dimmer_speed);
+                }
             }
-            else if (command_char == 'Z') {
-                Z = 1;
-            }
-            else if (command_char == 'C') {
-                sscanf(line, "%d", &speed_clks);
-            }
-            // __enable_irq();
+            /***************************************************** END SLAVE DIMMER LOOP ********************************************************/
         }
     }
 }
