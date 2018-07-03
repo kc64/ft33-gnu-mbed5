@@ -264,6 +264,7 @@ void vfnLoadSequencesFromSD(byte sequence) {
         NVIC_SystemReset();
     }
     else {
+        pc.printf("\n");    // in case the "No SD card found" message is sent, be sure to start with a fresh line buffer
         while(fgets(line, 100, fp) != NULL) {
             pc.printf(line);        // transmit to the slaves
             
