@@ -50,12 +50,12 @@ AnalogIn potentiometer(P0_11);
 
 /* Setup the output pins. */
 DigitalOut C0(P0_16);
-DigitalOut C1(P0_17);
-DigitalOut C2(P0_18);
-DigitalOut C3(P0_19);
-DigitalOut C4(P0_20);
-DigitalOut C5(P0_21);
-DigitalOut C6(P0_22);
+DigitalOut C1(P0_20);
+DigitalOut C2(P0_17);
+DigitalOut C3(P0_21);
+DigitalOut C4(P0_18);
+DigitalOut C5(P0_22);
+DigitalOut C6(P0_19);
 DigitalOut C7(P0_23);
 
 BusOut lights(P0_23, P0_19, P0_22, P0_18, P0_21, P0_17, P0_20, P0_16);
